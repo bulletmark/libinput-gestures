@@ -49,7 +49,7 @@ package exists in your release:
     sudo apt-get install libinput-tools
     
 
-Fedora (from fedora 25 and newer) needs to install `wmctrl` since wayland is the default window manager.
+Fedora (from fedora 25 and newer) users needs to install `wmctrl` since wayland is the default window manager.
 
     sudo dnf install wmctrl
 
