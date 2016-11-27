@@ -138,13 +138,17 @@ if [ $cmd = "install" -o $cmd = "uninstall" ]; then
 
     if [ $cmd = "install" ]; then
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME-setup
-	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME
+	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME.py
 	install -CDv -m 644 -t $DESTDIR$APPDIR $NAME.desktop
 	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.png
 	install -CDv -m 644 -t $DESTDIR$CNFDIR $NAME.conf
 	install -CDv -m 644 -t $DESTDIR$DOCDIR README.md
+    gcc -o $DESTDIR$BINDIR/$NAME $NAME.c
+    chgrp input $DESTDIR$BINDIR/$NAME
+    chmod 2755 $DESTDIR$BINDIR/$NAME
     else
 	rm -rfv $DESTDIR$BINDIR/$NAME
+    rm -rfv $DESTDIR$BINDIR/$NAME
 	rm -rfv $DESTDIR$APPDIR/$NAME.desktop
 	rm -rfv $DESTDIR$ICODIR/$NAME.png
 	rm -rfv $DESTDIR$CNFDIR/$NAME.conf
