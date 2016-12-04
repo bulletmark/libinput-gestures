@@ -4,7 +4,8 @@
 import os, sys, argparse, subprocess, shlex, re, getpass, fcntl
 from pathlib import Path
 
-PROG = Path(sys.argv[0]).name
+
+PROG = re.sub("\.py$", "", Path(sys.argv[0]).name)
 
 # Conf file containing gesture commands.
 # Search first for user file then system file.
