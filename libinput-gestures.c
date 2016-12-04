@@ -23,7 +23,7 @@ int main(int argc, char *argv[]) {
     }
 
     char scriptPath[PATH_MAX];
-    sprintf(scriptPath, "%s.py", exePath, PATH_MAX);
+    snprintf(scriptPath, PATH_MAX, "%s.py", exePath);
 
     return execv(scriptPath, argv);
 }
