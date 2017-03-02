@@ -228,6 +228,7 @@ class GESTURE:
 class SWIPE(GESTURE):
     'Class to handle this type of gesture'
     SUPPORTED_MOTIONS = ('left', 'right', 'up', 'down')
+    threshold = 70
 
     def begin(self, fingers):
         'Initialise this gesture at the start of motion'
@@ -238,11 +239,14 @@ class SWIPE(GESTURE):
         'Update this gesture for a motion'
         self.data[0] += float(coords[2])
         self.data[1] += float(coords[3])
+        if abs(self.data[0] - self.data[1]) >= self.threshold:
+            self.end()
+            return True
 
     def end(self):
         'Action this gesture at the end of a motion sequence'
         # Require movement beyond a small threshhold.
-        if abs(self.data[0] - self.data[1]) >= 70:
+        if abs(self.data[0] - self.data[1]) >= self.threshold:
             if abs(self.data[0]) > abs(self.data[1]):
                 motion = 'left' if self.data[0] < 0 else 'right'
             else:
@@ -254,6 +258,7 @@ class SWIPE(GESTURE):
 class PINCH(GESTURE):
     'Class to handle this type of gesture'
     SUPPORTED_MOTIONS = ('in', 'out')
+    threshold = 0.1
 
     def begin(self, fingers):
         'Initialise this gesture at the start of motion'
@@ -263,10 +268,13 @@ class PINCH(GESTURE):
     def update(self, coords):
         'Update this gesture for a motion'
         self.data += 1.0 - float(coords[5])
+        if abs(self.data) > self.threshold:
+            self.end()
+            return True
 
     def end(self):
         'Action this gesture at the end of a motion sequence'
-        if self.data != 0.0:
+        if abs(self.data) > self.threshold:
             self.action('in' if self.data >= 0.0 else 'out')
 
 # Table of configuration commands
@@ -417,7 +425,9 @@ for line in cmd.stdout:
     # Action each type of event
     if event == 'UPDATE':
         if handler:
-            handler.update(re.split(r'[ (/@]+', params))
+            result = handler.update(re.split(r'[ (/@]+', params))
+            if result:
+                handler = None
     elif event == 'BEGIN':
         handler = handlers.get(gesture)
         if handler:
