@@ -33,8 +33,8 @@ to read the touchpad device:
 
     sudo gpasswd -a $USER input
 
-After executing the above command, **log out of your session
-completely**, and then log back in to assign this group.
+After executing the above command, **restart you system completely**, 
+and then log back in to assign this group.
 
 NOTE: Arch users can just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.
