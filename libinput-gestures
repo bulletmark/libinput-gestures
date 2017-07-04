@@ -213,7 +213,7 @@ class COMMAND_internal(COMMAND):
 # Table of gesture handlers
 handlers = OrderedDict()
 
-def add_gesture_handler(cls):
+def add_gesture_handler(cls, **kwargs):
     'Create gesture handler instance and add to lookup table based on name'
     handlers[cls.__name__] = cls()
 
@@ -264,7 +264,6 @@ class GESTURE:
         if command and not args.debug:
             command.run()
 
-@add_gesture_handler
 class SWIPE(GESTURE):
     'Class to handle this type of gesture'
     SUPPORTED_MOTIONS = ('left', 'right', 'up', 'down',
@@ -299,6 +298,14 @@ class SWIPE(GESTURE):
                 motion = ('left_' if x < 0 else 'right_') + motion
 
         self.action(motion)
+
+@add_gesture_handler
+class SWIPE3(SWIPE):
+    pass
+
+@add_gesture_handler
+class SWIPE4(SWIPE):
+    pass
 
 @add_gesture_handler
 class PINCH(GESTURE):
@@ -491,6 +498,9 @@ for line in cmd.stdout:
     fingers, *argslist = other.split(maxsplit=1)
     params = argslist[0] if argslist else ''
 
+    if gesture == 'SWIPE':
+        gesture = gesture + fingers
+
     # Action each type of event
     if event == 'UPDATE':
         if handler:
@@ -511,3 +521,4 @@ for line in cmd.stdout:
     else:
         print('Unknown gesture + event received: {} + {}.'.format(gesture,
             event), file=sys.stderr)
+
