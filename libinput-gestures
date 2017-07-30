@@ -214,7 +214,9 @@ class COMMAND_internal(COMMAND):
             if index == minindex - count:
                 index = maxindex - count
             elif index >= maxindex:
-                index = minindex
+                index = minindex + (index - maxindex)
+            elif index < minindex:
+                index = maxindex - (index - minindex)
 
         # Switch to desired workspace
         if index >= minindex and index < maxindex:
