@@ -6,6 +6,35 @@ from collections import OrderedDict
 from pathlib import Path
 from distutils.version import LooseVersion as Version
 
+try:
+    import Xlib.display
+    import Xlib.error
+
+    def get_current_app_name_and_class():
+        display = Xlib.display.Display()
+        app = display.get_input_focus().focus
+        while True:
+            if not app:
+                return []
+            try:
+                wm_name = app.get_wm_name()
+                wm_class = app.get_wm_class()
+            except Xlib.error.BadWindow:
+                return []
+            ret = []
+            if wm_name:
+                ret.append(wm_name)
+            if wm_class:
+                ret += filter(lambda x: x, wm_class)
+            if len(ret):
+                #print('>> ', ret)
+                return ret
+            app = app.query_tree().parent
+
+except ImportError:
+    def get_current_app_name_and_class():
+        return []
+
 PROG = Path(sys.argv[0]).stem
 
 # Conf file containing gesture commands.
@@ -231,13 +260,16 @@ def add_gesture_handler(cls):
 
 class GESTURE:
     'Abstract base class for handling for gestures'
+
+    current_config_groups = ('global',)
+
     def __init__(self):
         'Initialise this gesture at program start'
         self.name = type(self).__name__
         self.motions = OrderedDict()
         self.has_extended = False
 
-    def add(self, motion, fingers, command):
+    def add(self, groups, motion, fingers, command):
         'Add a configured motion command for this gesture'
         if motion not in self.SUPPORTED_MOTIONS:
             return 'Gesture {} does not support motion "{}".\n' \
@@ -251,10 +283,11 @@ class GESTURE:
         if self.extended_text in motion:
             self.has_extended = True
 
-        key = (motion, fingers) if fingers else motion
+        key = (motion, fingers) if fingers else (motion,)
         cmds = shlex.split(command)
         cls = internal_commands.get(cmds[0], COMMAND)
-        self.motions[key] = cls(cmds)
+        for group in GESTURE.current_config_groups:
+            self.motions[(group,) + key] = cls(cmds)
         return None
 
     def begin(self, fingers):
@@ -264,8 +297,15 @@ class GESTURE:
 
     def action(self, motion):
         'Action a motion command for this gesture'
-        command = self.motions.get((motion, self.fingers)) or \
-                self.motions.get(motion)
+        app_info = get_current_app_name_and_class()
+        for x in app_info:
+            command = self.motions.get((x, motion, self.fingers)) or \
+                    self.motions.get((x, motion))
+            if command:
+                break
+        else:
+            command = self.motions.get(('global', motion, self.fingers)) or \
+                self.motions.get(('global', motion))
 
         if args.verbose:
             print('{}: {} {} {} {}'.format(PROG, self.name, motion,
@@ -364,7 +404,7 @@ def conf_gesture(lineargs):
         fingers = None
 
     # Add the configured gesture
-    return handler.add(motion.lower(), fingers, command)
+    return handler.add(GESTURE.current_config_groups, motion.lower(), fingers, command)
 
 @add_conf_command
 def conf_device(lineargs):
@@ -374,6 +414,11 @@ def conf_device(lineargs):
         args.device = lineargs
 
     return None if args.device else 'No device specified'
+
+@add_conf_command
+def conf_override(lineargs):
+    'Override app base configures'
+    GESTURE.current_config_groups = tuple(map(lambda x:x.strip(), lineargs.split(',')))
 
 def get_conf_line(line):
     'Process a single line in conf file'
