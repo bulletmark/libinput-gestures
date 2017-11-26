@@ -41,6 +41,8 @@ opt.add_argument('-e', '--env', action='store_true',
         help='just list out environment for diagnostic purposes')
 opt.add_argument('--device',
         help='explicit device name to use (or path if starts with /)')
+opt.add_argument('--max_events', type=int, 
+        help='maximum number of events to check before executing command')
 args = opt.parse_args()
 
 if args.debug or args.raw or args.env:
@@ -340,6 +342,16 @@ def add_conf_command(func):
     conf_commands[re.sub('^conf_', '', func.__name__)] = func
 
 @add_conf_command
+def conf_max_events(lineargs):
+    'Process a single device line in conf file'
+    # Command line overrides configuration file
+    if not args.max_events:
+        args.max_events = int(lineargs)
+        print("Max Events set from Config : {}".format(args.max_events))
+
+    return None if args.max_events else 'No max_events specified'
+
+@add_conf_command
 def conf_gesture(lineargs):
     'Process a single gesture line in conf file'
     fields = lineargs.split(maxsplit=2)
@@ -488,6 +500,7 @@ cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
 
 # Sit in a loop forever reading the libinput messages ..
 handler = None
+updates = 0
 for line in cmd.stdout:
 
     # Just output raw messages if in that mode
@@ -509,7 +522,15 @@ for line in cmd.stdout:
     if event == 'UPDATE':
         if handler:
             # Split parameters into list of clean numbers
-            handler.update(re.split(r'[^-.\d]+', params))
+            if not args.max_events or (args.max_events and updates < args.max_events):
+                handler.update(re.split(r'[^-.\d]+', params))
+                updates = updates+1
+            else:
+                #Enough updates! Time for action!!
+                updates = 0
+                if params != 'cancelled':
+                    handler.end()
+                handler = None
     elif event == 'BEGIN':
         handler = handlers.get(gesture)
         if handler:
@@ -519,6 +540,7 @@ for line in cmd.stdout:
                     file=sys.stderr)
     elif event == 'END':
         # Ignore gesture if final action is cancelled
+        updates = 0
         if handler and params != 'cancelled':
             handler.end()
         handler = None
