@@ -95,7 +95,13 @@ fingers. If specified then the command is executed when exactly that
 number of fingers is used in the gesture. If not specified then the
 command is executed when that gesture is executed with any number of
 fingers. Gestures specified with finger count have priority over the
-same gesture specified without any finger count.
+same gesture specified without any finger count. For example, to
+configure (for some linux window managers) virtual desktop switching
+using a 4 finger horizontal swipe, one can add the following to their
+`/etc/libinput-gestures.conf`:
+
+    gesture swipe left      4       xdotool key ctrl+alt+Left
+    gesture swipe right     4       xdotool key ctrl+alt+Right
 
 Of course, 2 finger swipes and taps are already interpreted by your DE
 and apps for scrolling etc.
