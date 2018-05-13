@@ -16,13 +16,13 @@ CONFDIRS = (USERDIR, '/etc')
 
 # Ratio of X/Y (or Y/X) at which we consider an oblique swipe gesture.
 # The number is the trigger angle in degrees.
-OBLIQUE_RATIO = math.tan(math.radians(22.5))
+oblique_ratio = math.tan(math.radians(22.5))
 
 # Minimum significant distance to move for swipes, in dots squared.
-ABZSQUARE = 70**2
+abzsquare = 70**2
 
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
-ROTATE_ANGLE = 15.0
+rotate_angle = 15.0
 
 # Set up command line arguments
 opt = argparse.ArgumentParser(description=__doc__)
@@ -299,7 +299,7 @@ class SWIPE(GESTURE):
         aby = abs(y)
 
         # Require absolute distance movement beyond a small thresh-hold.
-        if abx**2 + aby**2 < ABZSQUARE:
+        if abx**2 + aby**2 < abzsquare:
             return
 
         # Discriminate left/right or up/down.
@@ -307,11 +307,11 @@ class SWIPE(GESTURE):
         # oblique swipe (but only if any are configured)
         if abx > aby:
             motion = 'left' if x < 0 else 'right'
-            if self.has_extended and aby / abx > OBLIQUE_RATIO:
+            if self.has_extended and aby / abx > oblique_ratio:
                 motion += ('_up' if y < 0 else '_down')
         else:
             motion = 'up' if y < 0 else 'down'
-            if self.has_extended and abx / aby > OBLIQUE_RATIO:
+            if self.has_extended and abx / aby > oblique_ratio:
                 motion = ('left_' if x < 0 else 'right_') + motion
 
         self.action(motion)
@@ -331,7 +331,7 @@ class PINCH(GESTURE):
         'Action this gesture at the end of a motion sequence'
         ratio, angle = self.data
 
-        if self.has_extended and abs(angle) > ROTATE_ANGLE:
+        if self.has_extended and abs(angle) > rotate_angle:
             self.action('clockwise' if angle >= 0.0 else 'anticlockwise')
         elif ratio != 0.0:
             self.action('in' if ratio <= 0.0 else 'out')
@@ -378,6 +378,24 @@ def conf_device(lineargs):
         args.device = lineargs
 
     return None if args.device else 'No device specified'
+
+@add_conf_command
+def conf_threshold(lineargs):
+    'Process a single threshold line in conf file'
+    global abzsquare, oblique_ratio, rotate_angle
+    (option, value) = lineargs.split()
+
+    try:
+        if option == 'swipe_dist':
+            abzsquare = float(value)**2
+        elif option == 'oblique_swipe_angle':
+            oblique_ratio = float(math.tan(math.radians(float(value))))
+        elif option == 'rotate_angle':
+            rotate_angle = float(value)
+        else:
+            return 'Option \'{}\' not recoginized'.format(option)
+    except ValueError:
+        return 'Could not parse value \'{}\''.format(value)
 
 def get_conf_line(line):
     'Process a single line in conf file'
