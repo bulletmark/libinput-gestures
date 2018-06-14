@@ -244,6 +244,7 @@ class GESTURE:
         self.name = type(self).__name__
         self.motions = OrderedDict()
         self.has_extended = False
+        self.is_smooth = False
 
     def add(self, is_smooth, motion, fingers, command):
         'Add a configured motion command for this gesture'
