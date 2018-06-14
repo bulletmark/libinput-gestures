@@ -20,6 +20,10 @@ OBLIQUE_RATIO = math.tan(math.radians(22.5))
 
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
+SMOOTH_ROTATE_ANGLE = 0.1
+
+# Minimum ratio for smooth pinch
+PINCH_RATIO = 0.10
 
 # Set up command line arguments
 opt = argparse.ArgumentParser(description=__doc__)
@@ -245,9 +249,12 @@ class GESTURE:
         self.name = type(self).__name__
         self.motions = OrderedDict()
         self.has_extended = False
+        self.is_smooth = False
 
-    def add(self, motion, fingers, command):
+    def add(self, is_smooth, motion, fingers, command):
         'Add a configured motion command for this gesture'
+        self.is_smooth = is_smooth
+
         if motion not in self.SUPPORTED_MOTIONS:
             return 'Gesture {} does not support motion "{}".\n' \
                     'Must be "{}"'.format(self.name.lower(), motion,
@@ -270,6 +277,7 @@ class GESTURE:
         'Initialise this gesture at the start of motion'
         self.fingers = fingers
         self.data = [0.0, 0.0]
+        self.data_old = [0.0, 0.0]
 
     def action(self, motion):
         'Action a motion command for this gesture'
@@ -325,10 +333,30 @@ class PINCH(GESTURE):
 
     def update(self, coords):
         'Update this gesture for a motion'
-        self.data[0] += float(coords[4]) - 1.0
-        self.data[1] += float(coords[5])
+
+        if self.is_smooth:
+            self.data[0] = float(coords[4]) - 1.0
+            self.data[1] = float(coords[5])
+
+            ratio, angle = self.data
+            ratio_old, _ = self.data_old
+            ratio_delta = ratio - ratio_old
+
+            'Action this gesture at the end of a motion sequence'
+            if self.has_extended and abs(angle) > SMOOTH_ROTATE_ANGLE:
+                self.action('clockwise' if angle >= 0.0 else 'anticlockwise')
+                self.data_old = self.data[:]
+            elif abs(ratio_delta) > PINCH_RATIO:
+                self.action('in' if ratio_delta >= 0.0 else 'out')
+                self.data_old = self.data[:]
+        else:
+            self.data[0] += float(coords[4]) - 1.0
+            self.data[1] += float(coords[5])
 
     def end(self):
+        if self.is_smooth:
+            return
+
         'Action this gesture at the end of a motion sequence'
         ratio, angle = self.data
 
@@ -354,6 +382,13 @@ def conf_gesture(lineargs):
         return 'Invalid gesture line - not enough fields'
 
     gesture, motion, command = fields
+
+    if 'smooth' in gesture:
+        is_smooth = True
+        gesture = gesture.split('-')[-1]
+    else:
+        is_smooth = False
+
     handler = handlers.get(gesture.upper())
 
     if not handler:
@@ -369,7 +404,7 @@ def conf_gesture(lineargs):
         fingers = None
 
     # Add the configured gesture
-    return handler.add(motion.lower(), fingers, command)
+    return handler.add(is_smooth, motion.lower(), fingers, command)
 
 @add_conf_command
 def conf_device(lineargs):
