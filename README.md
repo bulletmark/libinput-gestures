@@ -52,8 +52,8 @@ libinput release 1.0 or later. Install prerequisites:
     # E.g. On Fedora:
     sudo dnf install xdotool wmctrl
 
-Debian and Ubuntu users also need to install `libinput-tools` if that
-package exists in your release:
+Debian and Ubuntu users may also need to install `libinput-tools` if
+that package exists in your release:
 
     sudo apt-get install libinput-tools
 
@@ -231,8 +231,10 @@ can completely manage browser tabs from your touchpad.
 ### TROUBLESHOOTING
 
 Please don't raise a github issue but provide little information about
-your problem, and please don't raise an issue until you have considered all
-the following steps.
+your problem, and please don't raise an issue until you have considered
+all the following steps. **If you raise an issue ALWAYS include the
+output of `libinput-gestures -l` to show the environment and
+configuration you are using, regardless of what the issue is about**.
 
 1. Ensure you are running the latest version from the
    [libinput-gestures github repository][REPO] or from the [Arch AUR][AUR].
@@ -270,7 +272,7 @@ the following steps.
    possible.
 
 7. Be sure that a configured external command works exactly how you want
-   when you run it directly on the command line **before** you configure
+   when you run it directly on the command line, **before** you configure
    it for `libinput-gestures`. E.g. run `xdotool` manually and
    experiment with various arguments to work out exactly what arguments
    it requires to do what you want, and only then add that command +
@@ -279,11 +281,11 @@ the following steps.
    `xdotool` command does not work correctly then there is no point
    raising an `libinput-gestures` issue about it!
 
-8. **If you raise an issue, always include the output** of
+8. **If you raise an issue, always include the output of
    `libinput-gestures -l` to show the environment and configuration you
-   are using. If appropriate, also paste the output from steps 4 and 5
+   are using**. If appropriate, also paste the output from steps 4 and 5
    above. If your device is not being recognised by `libinput-gestures`
-   at all, paste the output of `libinput list-devices`
+   at all, paste the complete output of `libinput list-devices`
    (`libinput-list-devices` on libinput < v1.8).
 
 ### LICENSE

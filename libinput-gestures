@@ -15,11 +15,12 @@ USERDIR = os.getenv('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
 CONFDIRS = (USERDIR, '/etc')
 
 # Ratio of X/Y (or Y/X) at which we consider an oblique swipe gesture.
-# The number is the trigger angle in degrees.
+# The number is the trigger angle in degrees and set to 360/8/2.
 OBLIQUE_RATIO = math.tan(math.radians(22.5))
 
-# Minimum significant distance to move for swipes, in dots squared.
-ABZSQUARE = 70**2
+# Default minimum significant distance to move for swipes, in dots.
+# Can be changed using configuration command.
+swipe_min_threshold = 0
 
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
@@ -43,6 +44,9 @@ opt.add_argument('-l', '--list', action='store_true',
         help='just list out environment and configuration')
 opt.add_argument('--device',
         help='explicit device name to use (or path if starts with /)')
+# Test/diag hidden option to specify a file containing libinput list
+# device output to parse
+opt.add_argument('--device-list', help=argparse.SUPPRESS)
 args = opt.parse_args()
 
 if args.debug or args.raw or args.list:
@@ -95,7 +99,12 @@ else:
 
 def get_devices_list():
     'Get list of devices and their attributes (as a dict) from libinput'
-    stdout = run(cmd_list_devices.split())
+    if args.device_list:
+        with open(args.device_list) as fd:
+            stdout = fd.read()
+    else:
+        stdout = run(cmd_list_devices.split())
+
     if stdout:
         dev = {}
         for line in stdout.splitlines():
@@ -104,7 +113,7 @@ def get_devices_list():
                 key, value = line.split(':', maxsplit=1)
                 dev[key.strip().lower()] = value.strip()
             elif dev:
-                yield(dev)
+                yield dev
                 dev = {}
 
 def get_device(name):
@@ -263,7 +272,12 @@ class GESTURE:
             self.has_extended = True
 
         key = (motion, fingers) if fingers else motion
-        cmds = shlex.split(command)
+
+        try:
+            cmds = shlex.split(command)
+        except Exception as e:
+            return str(e)
+
         cls = internal_commands.get(cmds[0], COMMAND)
         self.motions[key] = cls(cmds)
         return None
@@ -307,7 +321,7 @@ class SWIPE(GESTURE):
         aby = abs(y)
 
         # Require absolute distance movement beyond a small thresh-hold.
-        if abx**2 + aby**2 < ABZSQUARE:
+        if abx**2 + aby**2 < abzsquare:
             return
 
         # Discriminate left/right or up/down.
@@ -316,7 +330,7 @@ class SWIPE(GESTURE):
         if abx > aby:
             motion = 'left' if x < 0 else 'right'
             if self.has_extended and aby / abx > OBLIQUE_RATIO:
-                motion += ('_up' if y < 0 else '_down')
+                motion += '_up' if y < 0 else '_down'
         else:
             motion = 'up' if y < 0 else 'down'
             if self.has_extended and abx / aby > OBLIQUE_RATIO:
@@ -414,6 +428,17 @@ def conf_device(lineargs):
 
     return None if args.device else 'No device specified'
 
+@add_conf_command
+def swipe_threshold(lineargs):
+    'Change swipe threshold'
+    global swipe_min_threshold
+    try:
+        swipe_min_threshold = int(lineargs)
+    except Exception:
+        return 'Must be integer value'
+
+    return None if swipe_min_threshold >= 0 else 'Must be >= 0'
+
 def get_conf_line(line):
     'Process a single line in conf file'
     key, *argslist = line.split(maxsplit=1)
@@ -443,7 +468,7 @@ def get_conf(conffile, confname):
 
 def unexpanduser(cfile):
     'Return absolute path name, with $HOME replaced by ~'
-    relslash = cfile.resolve()
+    relslash = Path(os.path.abspath(str(cfile)))
     try:
         relhome = relslash.relative_to(os.getenv('HOME'))
     except ValueError:
@@ -515,6 +540,9 @@ user = getpass.getuser()
 proglock = open_lock(PROG, user)
 if not proglock:
     sys.exit('{} is already running for {}, terminating ..'.format(PROG, user))
+
+# Set up square of swipe threshold
+abzsquare = swipe_min_threshold**2
 
 # Note your must "sudo gpasswd -a $USER input" then log out/in for
 # permission to access the device.
