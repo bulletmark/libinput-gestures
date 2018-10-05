@@ -28,7 +28,7 @@ https://github.com/bulletmark/libinput-gestures.
 
 ### INSTALLATION
 
-IMPORTANT: You must be a member of the _input_ group to have permission
+NOTE User access option 1: You must be a member of the _input_ group to have permission
 to read the touchpad device:
 
     sudo gpasswd -a $USER input
@@ -36,6 +36,13 @@ to read the touchpad device:
 After executing the above command, **log out of your session
 completely**, and then log back in to assign this group (or just
 reboot).
+
+NOTE User access option 2: For automated handling of ACL through udev, you may 
+instead copy/symlink the included `53-example-touchpad-udev.rules` file to 
+`/etc/udev/rules.d/` once you find the correct key/value pairs to use for your 
+hardware.  Instructions are provided in the comments of the rules file.
+
+After verifying the udev rule, just reboot and login.
 
 NOTE: Arch users can just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.
