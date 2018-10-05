@@ -1,0 +1,37 @@
+# udev rules for Touchpad gestures
+#   => Give access to control interface to user
+#   => Do not to give control over other interfaces
+#
+# Key/value pairs can be found by:
+#
+#     udevadm info -a /dev/input/eventX
+#
+# where X is the number relating to the touchpad.
+#
+# To verify your udev rules update, run the following 
+# (the info command will provide you the correct parameter 
+# for `test` below):
+#
+#    sudo udevadm control -R; sudo udev trigger
+#    sudo udevadm test /devices/platform/{. . .}/input/inputX/eventY
+#
+# again where X,Y, etc., are the numbers relating to your 
+# touchpad device found by the `info` commend above.
+#
+# You will find information such as
+#
+#    TAGS=:uaccess:seat:
+#    USEC_INITIALIZED=xxxx
+#    run: 'uaccess'
+#
+# as part of the output of the touchpad device test.
+
+ACTION=="add", KERNEL=="event*", SUBSYSTEM=="input", SUBSYSTEMS=="input", ATTRS{name}=="ETPS/2 Elantech Touchpad", GOTO="elantech"
+
+GOTO="end"
+
+LABEL="elantech"
+TAG+="uaccess"
+
+LABEL="end"
+# vim: ft=udevrules
