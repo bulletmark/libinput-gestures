@@ -8,10 +8,7 @@ from distutils.version import LooseVersion as Version
 gi.require_version('Wnck', '3.0')
 gi.require_version('Gtk', '3.0')
 gi.require_version('Bamf', '3')
-from gi.repository import Wnck, Gtk, Bamf, Gio
-
-# cache for application id to name 
-APP_NAME_CACHE = {};
+from gi.repository import Bamf, Gio
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
@@ -249,7 +246,9 @@ class COMMAND_internal(COMMAND):
 
 # Table of gesture handlers
 handlers = OrderedDict()
-PROGS = {}
+programgroups = {}
+# cache for application id to name 
+appname_cache = {};
 
 def add_gesture_handler(cls):
     'Create gesture handler instance and add to lookup table based on name'
@@ -277,7 +276,7 @@ class GESTURE:
         if self.extended_text in motion:
             self.has_extended = True
 
-        PROGS[group] = 1;
+        programgroups[group] = 1;
         key = (group, motion, fingers) if fingers else (group, motion)
 
         try:
@@ -296,10 +295,9 @@ class GESTURE:
 
     def action(self, motion):
 
-	# TODO: get program name or sth different -> get_name() uses heuristic to determine  the name.. e.g. for chrome it returns tab/title name
         programname = '';
         appl = Bamf.Matcher.get_default().get_active_application()
-        if not appl in APP_NAME_CACHE:
+        if not appl in appname_cache:
          if appl:
            if appl.get_desktop_file():
               programname = Gio.DesktopAppInfo.new_from_filename( appl.get_desktop_file() ).get_name()
@@ -308,10 +306,9 @@ class GESTURE:
               programname =  appl.get_name()
 
            programname = programname.lower()
-           APP_NAME_CACHE[appl] = programname;
+           appname_cache[appl] = programname;
         else:
-           programname = APP_NAME_CACHE[appl];
-
+           programname = appname_cache[appl];
 
         if args.debug:
               print('current active window ',programname)
