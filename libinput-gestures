@@ -30,6 +30,9 @@ swipe_min_threshold = 0
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
 
+# Appname for grouping actions in .conf via [CATCHALL_APPNAME]
+CATCHALL_APPNAME='general'
+
 # Set up command line arguments
 opt = argparse.ArgumentParser(description=__doc__)
 opt.add_argument('-c', '--conffile',
@@ -294,29 +297,30 @@ class GESTURE:
 
     def action(self, motion):
 
+	# determine application name of the current active window
         appname = '';
         appl = Bamf.Matcher.get_default().get_active_application()
         if not appl in appname_cache:
-         if appl:
-           if appl.get_desktop_file():
-              appname = Gio.DesktopAppInfo.new_from_filename( appl.get_desktop_file() ).get_name()
+                if appl:
+                     if appl.get_desktop_file():
+                            appname = Gio.DesktopAppInfo.new_from_filename( appl.get_desktop_file() ).get_name()
 
-           if appname == '':
-              appname =  appl.get_name()
+                     if appname == '':
+                            appname =  appl.get_name()
 
-           appname = appname.lower()
-           appname_cache[appl] = appname;
+                     appname = appname.lower()
+                     appname_cache[appl] = appname;
         else:
-           appname = appname_cache[appl];
+                appname = appname_cache[appl];
 
         if args.debug:
-              print('current active window ',appname)
+                print('current active window ',appname)
 
         'Action a motion command for this gesture'
         command = self.motions.get((appname, motion, self.fingers)) or \
                 self.motions.get((appname, motion)) or \
-        	self.motions.get(('general', motion, self.fingers)) or \
-                self.motions.get(('general', motion))
+        	self.motions.get((CATCHALL_APPNAME, motion, self.fingers)) or \
+                self.motions.get((CATCHALL_APPNAME, motion))
 
 
         if args.verbose:
@@ -456,7 +460,7 @@ def swipe_threshold(lineargs):
 
     return None if swipe_min_threshold >= 0 else 'Must be >= 0'
 
-def get_conf_line(appname, line):
+def get_conf_line(line, appname):
     'Process a single line in conf file'
     key, *argslist = line.split(maxsplit=1)
 
@@ -473,18 +477,17 @@ def get_conf_line(appname, line):
 def get_conf(conffile, confname):
     'Read given configuration file and store internal actions etc'
     with conffile.open() as fp:
-        proggroup = 'general'
+        appname = CATCHALL_APPNAME
         for num, line in enumerate(fp, 1):
             line = line.strip()
             if not line or line[0] == '#':
                 continue
 
             if line[0] == '[':
-                proggroup = line[1:-1].strip().lower();
-#                print (proggroup)
+                appname = line[1:-1].strip().lower();
                 continue
 
-            errmsg = get_conf_line(proggroup, line)
+            errmsg = get_conf_line(line, appname)
             if errmsg:
                 sys.exit('Error at line {} in file {}:\n>> {} <<\n{}.'.format(
                     num, confname, line, errmsg))
