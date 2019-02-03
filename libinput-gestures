@@ -246,7 +246,7 @@ class COMMAND_internal(COMMAND):
 
 # Table of gesture handlers
 handlers = OrderedDict()
-programgroups = {}
+
 # cache for application id to name 
 appname_cache = {};
 
@@ -276,7 +276,6 @@ class GESTURE:
         if self.extended_text in motion:
             self.has_extended = True
 
-        programgroups[group] = 1;
         key = (group, motion, fingers) if fingers else (group, motion)
 
         try:
