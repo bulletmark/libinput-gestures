@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 'Read gestures from libinput touchpad and action shell commands.'
 # Mark Blakeney, Sep 2015
-import os, sys, argparse, subprocess, shlex, re, getpass, fcntl, platform, math
+import os, sys, argparse, subprocess, shlex, re, getpass, fcntl, platform, math, gi
 from collections import OrderedDict
 from pathlib import Path
 from distutils.version import LooseVersion as Version
+gi.require_version('Wnck', '3.0')
+gi.require_version('Gtk', '3.0')
+gi.require_version('Bamf', '3')
+from gi.repository import Wnck, Gtk, Bamf, Gio
+
+# cache for application id to name 
+APP_NAME_CACHE = {};
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
@@ -242,6 +249,7 @@ class COMMAND_internal(COMMAND):
 
 # Table of gesture handlers
 handlers = OrderedDict()
+PROGS = {}
 
 def add_gesture_handler(cls):
     'Create gesture handler instance and add to lookup table based on name'
@@ -255,7 +263,7 @@ class GESTURE:
         self.motions = OrderedDict()
         self.has_extended = False
 
-    def add(self, motion, fingers, command):
+    def add(self, motion, fingers, command, group):
         'Add a configured motion command for this gesture'
         if motion not in self.SUPPORTED_MOTIONS:
             return 'Gesture {} does not support motion "{}".\n' \
@@ -269,7 +277,8 @@ class GESTURE:
         if self.extended_text in motion:
             self.has_extended = True
 
-        key = (motion, fingers) if fingers else motion
+        PROGS[group] = 1;
+        key = (group, motion, fingers) if fingers else (group, motion)
 
         try:
             cmds = shlex.split(command)
@@ -286,15 +295,41 @@ class GESTURE:
         self.data = [0.0, 0.0]
 
     def action(self, motion):
+
+	# TODO: get program name or sth different -> get_name() uses heuristic to determine  the name.. e.g. for chrome it returns tab/title name
+        programname = '';
+        appl = Bamf.Matcher.get_default().get_active_application()
+        if not appl in APP_NAME_CACHE:
+         if appl:
+           if appl.get_desktop_file():
+              programname = Gio.DesktopAppInfo.new_from_filename( appl.get_desktop_file() ).get_name()
+
+           if programname == '':
+              programname =  appl.get_name()
+
+           programname = programname.lower()
+           APP_NAME_CACHE[appl] = programname;
+        else:
+           programname = APP_NAME_CACHE[appl];
+
+
+        if args.debug:
+              print('current active window ',programname)
+
         'Action a motion command for this gesture'
-        command = self.motions.get((motion, self.fingers)) or \
-                self.motions.get(motion)
+        command = self.motions.get((programname, motion, self.fingers)) or \
+                self.motions.get((programname, motion)) or \
+        	self.motions.get(('general', motion, self.fingers)) or \
+                self.motions.get(('general', motion))
+
 
         if args.verbose:
-            print('{}: {} {} {} {}'.format(PROGNAME, self.name, motion,
+            print('{}: [{}] {} {} {} {}'.format(PROGNAME, programname, self.name, motion,
                 self.fingers, self.data))
             if command:
                 print('  ', command)
+            else:
+                print('   no command')
 
         if command and not args.debug:
             command.run()
@@ -379,7 +414,7 @@ def add_conf_command(func):
     conf_commands[re.sub('^conf_', '', func.__name__)] = func
 
 @add_conf_command
-def conf_gesture(lineargs):
+def conf_gesture(lineargs, group):
     'Process a single gesture line in conf file'
     fields = lineargs.split(maxsplit=2)
 
@@ -403,7 +438,7 @@ def conf_gesture(lineargs):
         fingers = None
 
     # Add the configured gesture
-    return handler.add(motion.lower(), fingers, command)
+    return handler.add(motion.lower(), fingers, command, group)
 
 @add_conf_command
 def conf_device(lineargs):
@@ -425,7 +460,7 @@ def swipe_threshold(lineargs):
 
     return None if swipe_min_threshold >= 0 else 'Must be >= 0'
 
-def get_conf_line(line):
+def get_conf_line(group, line):
     'Process a single line in conf file'
     key, *argslist = line.split(maxsplit=1)
 
@@ -437,17 +472,23 @@ def get_conf_line(line):
         return 'Configuration command "{}" is not supported.\n' \
                 'Must be "{}"'.format(key, '" or "'.join(conf_commands))
 
-    return conf_func(argslist[0] if argslist else '')
+    return conf_func(argslist[0] if argslist else '', group)
 
 def get_conf(conffile, confname):
     'Read given configuration file and store internal actions etc'
     with conffile.open() as fp:
+        proggroup = 'general'
         for num, line in enumerate(fp, 1):
             line = line.strip()
             if not line or line[0] == '#':
                 continue
 
-            errmsg = get_conf_line(line)
+            if line[0] == '[':
+                proggroup = line[1:-1].strip().lower();
+#                print (proggroup)
+                continue
+
+            errmsg = get_conf_line(proggroup, line)
             if errmsg:
                 sys.exit('Error at line {} in file {}:\n>> {} <<\n{}.'.format(
                     num, confname, line, errmsg))
@@ -502,8 +543,8 @@ if args.verbose and not args.raw:
     print('Gestures configured in {}:'.format(confname))
     for h in handlers.values():
         for mpair, cmd in h.motions.items():
-            motion, fingers = (mpair, '') if isinstance(mpair, str) else mpair
-            print('{} {:10}{:>2} {}'.format(h.name.lower(), motion,
+            group,motion, fingers = (mpair, '') if isinstance(mpair, str) else mpair
+            print('{} {:10}{:>2} {}'.format('['+group+']', h.name.lower(), motion,
                 fingers, cmd))
     if args.device:
         print('device {}'.format(args.device))
@@ -573,6 +614,7 @@ for line in cmd.stdout:
                     params), file=sys.stderr)
 
     elif event == 'BEGIN':
+
         handler = handlers.get(gesture)
         if handler:
             handler.begin(fingers)
@@ -588,3 +630,5 @@ for line in cmd.stdout:
     else:
         print('Unknown gesture + event received: {} + {}.'.format(gesture,
             event), file=sys.stderr)
+
+
