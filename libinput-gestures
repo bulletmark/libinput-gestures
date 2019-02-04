@@ -542,7 +542,11 @@ if args.verbose and not args.raw:
     print('Gestures configured in {}:'.format(confname))
     for h in handlers.values():
         for mpair, cmd in h.motions.items():
-            appname,motion, fingers = (mpair, '') if isinstance(mpair, str) else mpair
+            if len(mpair) == 2:
+                appname, motion = mpair
+                fingers = ''
+            else:
+                appname, motion, fingers = mpair
             print('{} {:10}{:>2} {}'.format('['+appname+']', h.name.lower(), motion,
                 fingers, cmd))
     if args.device:
