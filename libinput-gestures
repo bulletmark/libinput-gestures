@@ -5,6 +5,7 @@ import os, sys, argparse, subprocess, shlex, re, getpass, fcntl, platform, math
 from collections import OrderedDict
 from pathlib import Path
 from distutils.version import LooseVersion as Version
+import threading
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
@@ -154,6 +155,7 @@ def get_device(name):
 
 class COMMAND:
     'Generic command handler'
+
     def __init__(self, args):
         self.reprstr = ' '.join(args)
 
@@ -179,6 +181,7 @@ def add_internal_command(cls):
 @add_internal_command
 class COMMAND_internal(COMMAND):
     'Internal command handler.'
+
     def __init__(self, args):
         'Action internal swipe commands'
         super().__init__(args)
@@ -249,6 +252,7 @@ def add_gesture_handler(cls):
 
 class GESTURE:
     'Abstract base class for handling for gestures'
+
     def __init__(self):
         'Initialise this gesture at program start'
         self.name = type(self).__name__
@@ -343,6 +347,7 @@ class SWIPE(GESTURE):
 
         self.action(motion)
 
+
 @add_gesture_handler
 class PINCH(GESTURE):
     'Class to handle this type of gesture'
@@ -355,6 +360,15 @@ class PINCH(GESTURE):
         try:
             x = float(coords[4])
             y = float(coords[5])
+
+            score = x - y
+            if 0.95 < score < 1:
+                self.end()
+            if 1.95 < score < 2:
+                self.end()
+            if 2.95 < score < 3:
+                self.end()
+
         except (ValueError, IndexError):
             return False
 
@@ -365,7 +379,7 @@ class PINCH(GESTURE):
     def end(self):
         'Action this gesture at the end of a motion sequence'
         ratio, angle = self.data
-
+        print("END")
         if self.has_extended and abs(angle) > ROTATE_ANGLE:
             self.action('clockwise' if angle >= 0.0 else 'anticlockwise')
         elif ratio != 0.0:
