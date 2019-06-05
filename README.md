@@ -48,7 +48,7 @@ libinput release 1.0 or later. Install prerequisites:
     sudo pacman -S xdotool wmctrl
 
     # E.g. On Debian based systems, e.g. Ubuntu:
-    sudo apt-get install xdotool wmctrl
+    sudo apt-get install xdotool wmctrl libbamf3-dev
 
     # E.g. On Fedora:
     sudo dnf install xdotool wmctrl
