@@ -66,30 +66,38 @@ def open_lock(*args):
 
     return fp
 
-def run(cmd, *, check=True, block=True):
-    'Run function and return standard output, Popen() handle, or None'
+def run_async(cmd, quiet=True):
+    """Run function asynchronously, returning a Popen() handle.
+    The 'quiet' parameter controls if output of the program should
+    be directed to /dev/null or printed to the console."""
+    if quiet:
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        return subprocess.Popen(cmd)
+
+def run(cmd, quiet=True):
+    """Run function synchronously, returning its output.
+    The 'quiet' parameter controls if stderr output should be
+    directed to /dev/null or printed to the console."""
     # Maintain subprocess compatibility with python 3.4 so use
     # check_output() rather than run().
-    try:
-        if block:
-            result = subprocess.check_output(cmd, universal_newlines=True,
-                    stderr=(None if check else subprocess.DEVNULL))
-        else:
-            result = subprocess.Popen(cmd)
-    except Exception as e:
-        result = None
-        if check:
-            print(str(e), file=sys.stderr)
-
-    return result
+    return subprocess.check_output(cmd, universal_newlines=True,
+                                   stderr=subprocess.DEVNULL if quiet else None)
 
 def get_libinput_vers():
     'Return the libinput installed version number string'
     # Try to use newer libinput interface then fall back to old
     # (depreciated) interface.
-    res = run(('libinput', '--version'), check=False)
-    return res.strip() if res else \
-            run(('libinput-list-devices', '--version'), check=False)
+    try:
+        res = run(('libinput', '--version'))
+        return res.strip()
+    except FileNotFoundError:
+        try:
+            # If libinput isn't installed this will still fail
+            res = run(('libinput-list-devices', '--version'))
+            return res
+        except FileNotFoundError:
+            return None
 
 # Libinput changed the way in which it's utilities are called
 libvers = get_libinput_vers()
@@ -109,7 +117,10 @@ def get_devices_list():
         with open(args.device_list) as fd:
             stdout = fd.read()
     else:
-        stdout = run(cmd_list_devices.split())
+        try:
+            stdout = run(cmd_list_devices.split())
+        except subprocess.CalledProcessError:
+            return None
 
     if stdout:
         dev = {}
@@ -176,7 +187,7 @@ class COMMAND:
 
     def run(self):
         'Run this command + arguments'
-        run(self.argslist, block=False)
+        run_async(self.argslist, quiet=not args.verbose)
 
     def __str__(self):
         'Return string representation'
@@ -217,8 +228,9 @@ class COMMAND_internal(COMMAND):
 
     def run(self):
         'Get list of current workspaces and select next one'
-        stdout = run(('wmctrl', '-d'), check=False)
-        if not stdout:
+        try:
+            stdout = run(('wmctrl', '-d'))
+        except subprocess.CalledProcessError:
             # This command can fail on GNOME when you have only a single
             # dynamic workspace using Xorg (probably a GNOME bug) so let's
             # just ignore it given there is no other workspace to switch to
@@ -251,7 +263,7 @@ class COMMAND_internal(COMMAND):
 
         # Switch to desired workspace
         if index >= minindex and index < maxindex:
-            run(('wmctrl', '-s', str(index)), block=False)
+            run_async(('wmctrl', '-s', str(index)))
 
 # Table of gesture handlers
 handlers = OrderedDict()
@@ -502,8 +514,12 @@ if args.verbose:
         platform.python_version(), libvers))
 
     # Output hash version/checksum of this program
-    vers = run(('md5sum', str(PROGPATH)), check=False)
-    vers = str(vers.split()[0]) if vers else '?'
+    try:
+        vers = run(('md5sum', str(PROGPATH)))
+        vers = vers.split()[0]
+    except subprocess.CalledProcessError:
+        vers = '?'
+
     print('{}: hash {}'.format(PROGPATH, vers))
 
 # Search for configuration file. Use file given as command line
@@ -621,7 +637,13 @@ for line in cmd.stdout:
         # Ignore gesture if final action is cancelled
         if handler:
             if params != 'cancelled':
-                handler.end()
+                # Command is executed inside the 'end' function.
+                # Wrapped in a try/catch so that the failure of one
+                # command won't kill the process
+                try:
+                    handler.end()
+                except Exception as e:
+                    print(str(e), file=sys.stderr)
             handler = None
     else:
         print('Unknown gesture + event received: {} + {}.'.format(gesture,
