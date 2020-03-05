@@ -604,6 +604,53 @@ def read_conf(conffile, defname):
     get_conf(confpath, confname)
     return confname
 
+def center(points):
+    center = [0, 0]
+    for point in points:
+        center[0] += point[0]
+        center[1] += point[1]
+    return (center[0] / len(points), center[1] / len(points))
+
+def diff(point1, point2):
+    return((point2[0] - point1[0], point2[1] - point1[1]))
+
+def meanDist(points, center):
+    dist = 0
+    for point in points:
+        vec = diff(center, point)
+        dist += vec[0]**2 + vec[1]**2
+    return dist / len(points)
+
+def normCrossProd(x1, y1, x2, y2):
+    return (x1*y2 - x2*y1) / (0.0000001 + math.sqrt(x1**2 + y1**2) * math.sqrt(x2**2 + y2**2))
+
+def calcAngle(startPos, lastPos, startCenter, lastCenter):
+    angle = 0
+    xc1, yc1 = startCenter
+    xc2, yc2 = lastCenter
+    for i in range(0, len(startPos)):
+        x1, y1 = startPos[i]
+        x2, y2 = lastPos[i]
+        angle += math.asin(normCrossProd(x1 - xc1, y1 - yc1, x2 - xc2, y2 - yc2))
+    return angle / len(startPos)
+
+def touchGesture(startPos, lastPos):
+    startCenter = center(startPos)
+    lastCenter = center(lastPos)
+
+    xrel, yrel = diff(startCenter, lastCenter)
+    dist = xrel**2 + yrel**2
+
+    ratio = meanDist(lastPos, lastCenter) - meanDist(startPos, startCenter)
+    angle = calcAngle(startPos, lastPos, startCenter, lastCenter)
+
+    if dist > abs(ratio) and angle < ROTATE_ANGLE:
+        return({'gesture': 'SWIPE',
+                'params': [0, 0, xrel, yrel]})
+    else:
+        return({'gesture': 'PINCH',
+                'params': [0, 0, 0, 0, ratio, angle * 100]})
+
 def main():
     global args, abzsquare
 
@@ -719,12 +766,72 @@ def main():
 
     # Sit in a loop forever reading the libinput messages ..
     handler = None
+    nfingers = 0
+    lastPos = []
+    startPos = []
+    ready = True
     for line in cmd.stdout:
 
         # Just output raw messages if in that mode
         if args.raw:
             print(line.strip())
             continue
+
+        # Touchscreen libinput parsing
+        if 'TOUCH_' in line:
+            line = re.sub("/ ", "/", line)
+            device, event, other = line.strip().split(maxsplit = 2)
+            event = event[6:]
+            if event == 'FRAME':
+                continue
+            elif event == 'UP':
+                time, finger, fingerp, pos, realpos = other, None, None, None, None
+                xpos, ypos = None, None
+            else:
+                time, finger, fingerp, pos, realpos = other.split(maxsplit = 4)
+                xpos, ypos = pos.split('/')
+                finger = int(finger)
+                xpos = float(xpos)
+                ypos = float(ypos)
+
+            if ready:
+                # Track each new finger
+                # Store the current fingers positions
+                if event == 'DOWN':
+                    if nfingers == 0:
+                        lastPos = []
+                        startPos = []
+                    lastPos.append((xpos, ypos))
+                    startPos = lastPos.copy()
+                    nfingers += 1
+
+                # Follow last known position for each finger
+                if nfingers > 0 and event == 'MOTION':
+                    lastPos[finger] = (xpos, ypos)
+
+                # Trigger gesture at the first lifted finger
+                if nfingers > 0 and event == 'UP':
+                    touch = touchGesture(startPos, lastPos)
+                    handler = handlers.get(touch["gesture"])
+                    if handler:
+                        handler.begin("{}".format(nfingers))
+                        handler.update(touch["params"])
+                        handler.end()
+                        handler = None
+                    else:
+                        print('unknown gesture received: {}.'.format(gesture),
+                            file=sys.stderr)
+                    ready = False
+                    nfingers -= 1
+            else:
+                # After the gesture is sent, wait for all fingers to be released
+                if event == 'DOWN':
+                    nfingers += 1
+                if event == 'UP':
+                    nfingers -= 1
+                if nfingers == 0:
+                    ready = True
+                continue
 
         # Only interested in gestures
         if 'GESTURE_' not in line:
