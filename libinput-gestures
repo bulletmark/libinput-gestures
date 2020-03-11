@@ -649,7 +649,7 @@ def touchGesture(startPos, lastPos):
                 'params': [0, 0, xrel, yrel]})
     else:
         return({'gesture': 'PINCH',
-                'params': [0, 0, 0, 0, ratio, angle * 100]})
+                'params': [0, 0, 0, 0, ratio, angle / math.pi * 180]})
 
 def main():
     global args, abzsquare
