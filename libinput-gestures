@@ -822,10 +822,7 @@ def main():
                     nfingers -= 1
             else:
                 # After the gesture is sent, wait for all fingers to be released
-                if event == 'DOWN':
-                    nfingers += 1
-                if event == 'UP':
-                    nfingers -= 1
+                nfingers += (event == 'DOWN') - (event == 'UP')
                 if nfingers == 0:
                     lastPos = []
                     startPos = []
