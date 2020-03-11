@@ -798,9 +798,6 @@ def main():
                 # Track each new finger
                 # Store the current fingers positions
                 if event == 'DOWN':
-                    if nfingers == 0:
-                        lastPos = []
-                        startPos = []
                     lastPos.append((xpos, ypos))
                     startPos = lastPos.copy()
                     nfingers += 1
@@ -830,6 +827,8 @@ def main():
                 if event == 'UP':
                     nfingers -= 1
                 if nfingers == 0:
+                    lastPos = []
+                    startPos = []
                     ready = True
                 continue
 
