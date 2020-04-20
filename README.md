@@ -41,7 +41,7 @@ reboot).
 NOTE: Arch users can just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.
 
-You need python 3.4 or later, python2 is not supported. You also need
+You need python 3.5 or later, python2 is not supported. You also need
 libinput release 1.0 or later. Install prerequisites:
 
     # E.g. On Arch:
@@ -147,9 +147,8 @@ if needed. If you have multiple touchpads you can also specify
 
 ### STARTING AND STOPPING
 
-Search for, and then start, the `libinput-gestures` app in your DE or
-you can start it immediately in the background using the command line
-utility:
+Start the application immediately in the background using the command
+line utility:
 
     libinput-gestures-setup start
 
@@ -173,6 +172,12 @@ You can restart the app or reload the configuration file with:
 You can check the status of the app with:
 
     libinput-gestures-setup status
+
+Note on some uncommon systems `libinput-gestures-setup start` may fail
+to start the application returning you a message _Don't know how to
+invoke libinput-gestures.desktop_. If you get this error message,
+install the dex package, preferably from your system packages
+repository, and try again.
 
 ### UPGRADE
 
@@ -243,6 +248,17 @@ each at 90 degrees separation, you can add the above extra 4 swipes to
 give a total of 8 swipe gestures each at 45 degrees separation. It works
 better than you may expect, at least after some practice. It means you
 can completely manage browser tabs from your touchpad.
+
+### PROBLEM RESUMING FROM SUSPEND
+
+Some touchpads have a problem which causes `libinput-gestures` to stop
+after resuming from a system suspend. You can use a companion program
+[`dbus-action`](https://github.com/bulletmark/dbus-action/) to overcome
+this. See the example configuration for `libinput-gestures` in the
+default `dbus-action` [configuration
+file](https://github.com/bulletmark/dbus-action/blob/master/dbus-action.conf).
+This utility can also be used to restart `libinput-gestures` on
+any D-Bus event.
 
 ### TROUBLESHOOTING
 

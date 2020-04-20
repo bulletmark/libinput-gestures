@@ -58,8 +58,6 @@ def open_lock(*args):
 
 def run(cmd, *, check=True, block=True):
     'Run function and return standard output, Popen() handle, or None'
-    # Maintain subprocess compatibility with python 3.4 so use
-    # check_output() rather than run().
     try:
         if block:
             result = subprocess.check_output(cmd, universal_newlines=True,
@@ -276,10 +274,9 @@ class COMMAND_internal(COMMAND):
         stdout = run(self.CMDLIST, check=False)
         if not stdout:
             # This command can fail on GNOME when you have only a single
-            # dynamic workspace using Xorg (probably a GNOME bug) so let's
-            # just ignore it given there is no other workspace to switch to
-            # anyhow.
-            return
+            # dynamic workspace (probably a GNOME bug) so let's just
+            # fudge that default case.
+            stdout = '0 *\n1 -'
 
         # Parse the output of above command
         lines = [l.split(maxsplit=2)[1] for l in stdout.strip().splitlines()]

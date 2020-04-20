@@ -48,27 +48,39 @@ cmd="$1"
 # Pretty crude at present but should work for at least GNOME and KDE.
 launch() {
     local app="$1"
+    local fullpath="$APPDIR/$app.desktop"
+    local binpath="$APPBIN/$app"
 
-    if echo $XDG_CURRENT_DESKTOP | grep -q KDE; then
-	if hash kioclient5 &>/dev/null; then
-	    kioclient5 exec "$APPDIR/$app.desktop" >/dev/null
-	    return $?
-	elif hash kioclient &>/dev/null; then
-	    kioclient exec "$APPDIR/$app.desktop" >/dev/null
-	    return $?
+    # All the commands we will potentially try ..
+    local cmds=(
+	"kde kioclient5 exec $fullpath"
+	"kde kioclient exec $fullpath"
+	"all gtk-launch $app"
+	"all i3-msg exec $binpath"
+	"all exo-open $fullpath"
+	"all dex $fullpath"
+    )
+
+    local cmdline
+    for cmdline in "${cmds[@]}" ; do
+	IFS=' ' read de cmd args <<< "$cmdline"
+
+        # Skip if the command does not exist
+	if ! hash $cmd &>/dev/null; then
+	    continue
 	fi
-    fi
 
-    if hash gtk-launch &>/dev/null; then
-	gtk-launch "$app"
-	return $?
-    fi
+	# Only try KDE commands on KDE
+	if ! echo $XDG_CURRENT_DESKTOP | grep -q KDE; then
+	    if [[ $de == kde ]]; then
+		continue
+	    fi
+	fi
 
-    if hash i3-msg &>/dev/null; then
-	i3-msg exec $BINDIR/$app >/dev/null
-	# i3-msg will return successfully even if "$app" fails to start
+	# Execute this command
+	$cmd $args &>/dev/null
 	return $?
-    fi
+    done
 
     echo "Don't know how to invoke $app.desktop" >&2
     return 1
@@ -153,12 +165,13 @@ if [[ $cmd == install || $cmd == uninstall ]]; then
 
     # Remove any old files from earlier versions of program
     rm -f $DESTDIR$OCODIR/$NAME.png
+    rm -f $DESTDIR$ICODIR/$NAME.png
 
     if [[ $cmd == install ]]; then
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME-setup
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME
 	install -CDv -m 644 -t $DESTDIR$APPDIR $NAME.desktop
-	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.png
+	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.svg
 	install -CDv -m 644 -t $DESTDIR$CNFDIR $NAME.conf
 	install -CDv -m 644 -t $DESTDIR$DOCDIR README.md
 
@@ -169,7 +182,7 @@ if [[ $cmd == install || $cmd == uninstall ]]; then
     else
 	rm -rfv $DESTDIR$BINDIR/$NAME
 	rm -rfv $DESTDIR$APPDIR/$NAME.desktop
-	rm -rfv $DESTDIR$ICODIR/$NAME.png
+	rm -rfv $DESTDIR$ICODIR/$NAME.svg
 	rm -rfv $DESTDIR$CNFDIR/$NAME.conf
 	rm -rfv $DESTDIR$DOCDIR
 	rm -rfv $DESTDIR$BINDIR/$NAME-setup

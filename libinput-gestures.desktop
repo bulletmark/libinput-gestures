@@ -1,5 +1,6 @@
 [Desktop Entry]
 Type=Application
+NoDisplay=true
 Terminal=false
 Name=Libinput Gestures
 Exec=/usr/bin/libinput-gestures
