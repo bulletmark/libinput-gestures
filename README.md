@@ -273,8 +273,8 @@ multiple times based on the size of your swipe. E.g, use the utility
 script installed with `libinput-gestures` and configure gestures like
 the following to jump between tabs. Large swipes will jump up to 4 tabs.
 
-    gesture swipe right_up /use/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_4# xdotool key control+Tab
-    gesture swipe left_up  /use/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_4# xdotool key control+shift+Tab
+    gesture swipe right_up /usr/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_4# xdotool key control+Tab
+    gesture swipe left_up  /usr/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_4# xdotool key control+shift+Tab
 
 As a more comprehensive example for volume control, use the utility
 script installed with `libinput-gestures` to also output a notification
@@ -282,6 +282,13 @@ of the volume settings.
 
     gesture swipe up   /usr/share/libinput-gestures/scripts/set-volume #SCALE_1_50#%+
     gesture swipe down /usr/share/libinput-gestures/scripts/set-volume #SCALE_1_50#%-
+    
+You can also use the Volume button repeatedly based on the size
+of your swipe. It will provide a default system output for audio volume.
+
+    gesture swipe up /usr/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_20# xdotool key XF86AudioRaiseVolume
+    gesture swipe down /usr/share/libinput-gestures/scripts/repeat-cmd #SCALE_1_20# xdotool key XF86AudioLowerVolume
+    
 
 ### TROUBLESHOOTING
 
