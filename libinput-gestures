@@ -411,7 +411,6 @@ class GESTURE:
         'Get threshold for update command'
         thresh = self.thresholds.get((motion, self.fingers)) or \
                 self.thresholds.get(motion)
-        print(thresh)
         if thresh == None:
             thresh=0
         return int(thresh)
@@ -465,9 +464,10 @@ class SWIPE(GESTURE):
             if self.has_extended and aby > 0 and abx / aby > OBLIQUE_RATIO:
                 motion = ('left_' if x2 < 0 else 'right_') + motion
         if self.thresholdmove(motion) > 0:
-            if abx**2 + aby**2-self.moved > self.thresholdmove(motion):
+            if abx**2 + aby**2-self.moved**2 > self.thresholdmove(motion):
+                self.moved+=self.thresholdmove(motion)
                 self.action(motion)
-                self.moved+=abx**2 + aby**2
+                
         return True
 
     def end(self):
@@ -554,7 +554,7 @@ def conf_gesture(lineargs):
         fingers = None
     thresh, *gcommand = command.split(maxsplit=1)
     if thresh.isnumeric():
-        command = gcommand[0] if fcommand else ''
+        command = gcommand[0] if gcommand else ''
     else:
         thresh = 0
     # Add the configured gesture
