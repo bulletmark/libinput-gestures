@@ -382,7 +382,6 @@ class GESTURE:
         # their discrimination
         if self.extended_text in motion:
             self.has_extended = True
-        self.thresh = threshold
         key = (motion, fingers) if fingers else motion
         
         try:
