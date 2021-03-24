@@ -490,8 +490,8 @@ class SWIPE(GESTURE):
             motion = 'up' if y < 0 else 'down'
             if self.has_extended and aby > 0 and abx / aby > OBLIQUE_RATIO:
                 motion = ('left_' if x < 0 else 'right_') + motion
-
-        self.action(motion)
+        if self.thresholdmove(motion)==0:
+            self.action(motion)
 
 @add_gesture_handler
 class PINCH(GESTURE):
