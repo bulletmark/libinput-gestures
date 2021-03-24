@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 'Read gestures from libinput touchpad and action shell commands.'
-# Mark Blakeney, Sep 2015
+# Mark Blakeney, Sep 2015.
 import os
 import sys
 import argparse
@@ -11,11 +11,22 @@ import getpass
 import fcntl
 import platform
 import math
-import signal
+import hashlib
+import threading
 from time import monotonic
 from collections import OrderedDict
 from pathlib import Path
 from distutils.version import LooseVersion as Version
+
+dbus_imported = True
+try:
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+except ImportError:
+    dbus_imported = False
+
+session_locked = False
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
@@ -58,14 +69,12 @@ def open_lock(*args):
 
 def run(cmd, *, check=True, block=True):
     'Run function and return standard output, Popen() handle, or None'
-    # Maintain subprocess compatibility with python 3.4 so use
-    # check_output() rather than run().
     try:
         if block:
             result = subprocess.check_output(cmd, universal_newlines=True,
                     stderr=(None if check else subprocess.DEVNULL))
         else:
-            result = subprocess.Popen(cmd)
+            result = bool(subprocess.Popen(cmd))
     except Exception as e:
         result = None
         if check:
@@ -110,7 +119,7 @@ def get_device_info(name, cmd_list_devices, device_list):
 
     if not devices:
         print('Can not see any devices, did you add yourself to the '
-                'input group and log out/in?', file=sys.stderr)
+                'input group and reboot?', file=sys.stderr)
         return None
 
     # If a specific device name was asked for then return that device
@@ -218,6 +227,7 @@ class COMMAND_internal(COMMAND):
 
     commands_list = [c[0] for c in commands]
 
+    CMDTEST = 'wmctrl -m'.split()
     CMDLIST = 'wmctrl -d'.split()
     CMDSET = 'wmctrl -s'.split()
 
@@ -240,6 +250,13 @@ class COMMAND_internal(COMMAND):
         self.rows = 0
         self.cols = 0
         cmdi = self.commands_list.index(args.action)
+
+        if self.CMDTEST[0] and not run(self.CMDTEST, check=False):
+            print('Warning: must install {} to use _internal command.'.format(
+                self.CMDTEST[0]), file=sys.stderr)
+
+        # Only do above check once
+        self.CMDTEST[0] = ''
 
         if cmdi >= 2:
             if args.row or args.col:
@@ -276,13 +293,12 @@ class COMMAND_internal(COMMAND):
         stdout = run(self.CMDLIST, check=False)
         if not stdout:
             # This command can fail on GNOME when you have only a single
-            # dynamic workspace using Xorg (probably a GNOME bug) so let's
-            # just ignore it given there is no other workspace to switch to
-            # anyhow.
-            return
+            # dynamic workspace (probably a GNOME bug) so let's just
+            # fudge that default case.
+            stdout = '0 *\n1 -'
 
         # Parse the output of above command
-        lines = [l.split(maxsplit=2)[1] for l in stdout.strip().splitlines()]
+        lines = [ln.split(maxsplit=2)[1] for ln in stdout.strip().splitlines()]
         start = index = lines.index('*')
         num = len(lines)
         cols = self.cols or num // self.rows
@@ -635,6 +651,25 @@ def read_conf(conffile, defname):
     get_conf(confpath, confname)
     return confname
 
+def lockcheck():
+    'Listen on DBus to set session_locked state'
+    def proc(busname, vals, _):
+        global session_locked
+        if busname == 'org.freedesktop.login1.Session':
+            val = vals.get('LockedHint')
+            if val is not None:
+                session_locked = bool(val)
+
+    DBusGMainLoop(set_as_default=True)
+    dbus.SystemBus().add_signal_receiver(
+        proc,
+        'PropertiesChanged',
+        'org.freedesktop.DBus.Properties',
+        'org.freedesktop.login1',
+    )
+
+    GLib.MainLoop().run()
+
 def main():
     global args, abzsquare
 
@@ -683,8 +718,7 @@ def main():
             platform.python_version(), libvers))
 
         # Output hash version/checksum of this program
-        vers = run(('md5sum', str(PROGPATH)), check=False)
-        vers = str(vers.split()[0]) if vers else '?'
+        vers = hashlib.md5(PROGPATH.read_bytes()).hexdigest()
         print('{}: hash {}'.format(PROGPATH, vers))
 
     # Read and process the conf file
@@ -737,20 +771,26 @@ def main():
     # Set up square of swipe threshold
     abzsquare = swipe_min_threshold**2
 
-    # Note your must "sudo gpasswd -a $USER input" then log out/in for
+    # Note your must "sudo gpasswd -a $USER input" then reboot for
     # permission to access the device.
     devstr = ' --device {}'.format(device.get('_path')) if device else ''
     command = 'stdbuf -oL -- {}{}'.format(cmd_debug_events, devstr)
 
+    if dbus_imported:
+        t = threading.Thread(target=lockcheck)
+        t.daemon = True
+        t.start()
+
     cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
             bufsize=1, universal_newlines=True)
-
-    # Avoid producing zombie processes
-    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
     # Sit in a loop forever reading the libinput messages ..
     handler = None
     for line in cmd.stdout:
+
+        # Ignore gestures if this session is locked
+        if session_locked:
+            continue
 
         # Just output raw messages if in that mode
         if args.raw:

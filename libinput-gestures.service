@@ -1,0 +1,12 @@
+[Unit]
+Description=Actions gestures on your touchpad using libinput
+Documentation=https://github.com/bulletmark/libinput-gestures
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/libinput-gestures
+
+[Install]
+WantedBy=graphical-session.target

@@ -29,29 +29,36 @@ https://github.com/bulletmark/libinput-gestures.
 
 ### INSTALLATION
 
-IMPORTANT: You must be a member of the _input_ group to have permission
+You need python 3.5 or later, python2 is not supported. You also need
+libinput release 1.0 or later.
+
+You **must be a member of the _input_ group** to have permission
 to read the touchpad device:
 
     sudo gpasswd -a $USER input
 
-After executing the above command, **log out of your session
-completely**, and then log back in to assign this group (or just
-reboot).
+After executing the above command, reboot your system.
 
-NOTE: Arch users can just install [_libinput-gestures from the
-AUR_][AUR]. Then skip to the next CONFIGURATION section.
+Most/many users will require to install the following although neither are
+actual dependencies because some custom configurations will not require
+them. If you are unsure initially, install both of them.
 
-You need python 3.4 or later, python2 is not supported. You also need
-libinput release 1.0 or later. Install prerequisites:
+|Prerequisite|Required for |
+|------------|-------------|
+|`wmctrl`    |Necessary for `_internal` command, as per default configuration|
+|`xdotool`   |Simulates keyboard and mouse actions for Xorg or XWayland based apps|
 
     # E.g. On Arch:
-    sudo pacman -S xdotool wmctrl
+    sudo pacman -S wmctrl xdotool
 
     # E.g. On Debian based systems, e.g. Ubuntu:
-    sudo apt-get install xdotool wmctrl
+    sudo apt-get install wmctrl xdotool
 
     # E.g. On Fedora:
-    sudo dnf install xdotool wmctrl
+    sudo dnf install wmctrl xdotool
+
+NOTE: Arch users can now just install [_libinput-gestures from the
+AUR_][AUR]. Then skip to the next CONFIGURATION section.
 
 Debian and Ubuntu users may also need to install `libinput-tools` if
 that package exists in your release:
@@ -147,32 +154,62 @@ if needed. If you have multiple touchpads you can also specify
 
 ### STARTING AND STOPPING
 
-Search for, and then start, the `libinput-gestures` app in your DE or
-you can start it immediately in the background using the command line
-utility:
+You must choose between starting the application as a [systemd user
+service](https://wiki.archlinux.org/index.php/Systemd/User), or as a
+[desktop
+application](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html)
+(with an XDG compliant DE such as GNOME and KDE). The systemd user service
+option for `libinput-gestures` was added in Feb 2021 and provides more
+robust management and better logging than the desktop so is now the preferred choice.
+Choose one of the two following options:
 
-    libinput-gestures-setup start
+1. To set up the application as a [systemd user
+   service](https://wiki.archlinux.org/index.php/Systemd/User):
 
-You can stop the background app with:
+````
+libinput-gestures-setup service
+````
 
-    libinput-gestures-setup stop
+2. Or instead, to set up the application using your
+   [DE](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html):
 
-You can enable the app to start automatically in the background when you
-log in (on an XDG compliant DE such as GNOME and KDE) with:
+````
+libinput-gestures-setup desktop
+````
+
+After *choosing one of the above*, you can use then run the following commands:
+
+Enable the app to start automatically in the background when you
+log in with:
 
     libinput-gestures-setup autostart
 
-You can disable the app from starting automatically with:
+Disable the app from starting automatically with:
 
     libinput-gestures-setup autostop
 
-You can restart the app or reload the configuration file with:
+Start the app immediately in the background:
+
+    libinput-gestures-setup start
+
+Stop the background app immediately with:
+
+    libinput-gestures-setup stop
+
+Restart the app, e.g. to reload the configuration file, with:
 
     libinput-gestures-setup restart
 
-You can check the status of the app with:
+Check the status of the app with:
 
     libinput-gestures-setup status
+
+Note if you are starting using the DE option and you are using some
+uncommon systems then `libinput-gestures-setup start` may fail
+to start the application returning you a message _Don't know how to
+invoke libinput-gestures.desktop_. If you get this error message,
+install the dex package, preferably from your system packages
+repository, and try again.
 
 ### UPGRADE
 
@@ -189,21 +226,21 @@ You can check the status of the app with:
 
 ### WAYLAND AND OTHER NOTES
 
-This utility exploits `xdotool` which unfortunately only works with
-X11/Xorg based applications. So `xdotool` shortcuts for the desktop do
-not work under GNOME on Wayland which is the default since GNOME
-3.22. However, it is found that `wmctrl` desktop selection commands do work
-under GNOME on Wayland (via XWayland) so this utility adds a built-in
-`_internal` command which can be used to switch workspaces using the
-swipe commands.
-The `_internal` `ws_up` and `ws_down` commands use `wmctrl` to work out
-the current workspace and select the next one. Since this works on both
-Wayland and Xorg, and with GNOME, KDE, and other EWMH compliant
-desktops, it is the default configuration command for swipe up and
-down commands in `libinput-gestures.conf`. See the comments in that file
-about other options you can do with the `_internal` command.
-Unfortunately `_internal` does not work with Compiz for Ubuntu
-Unity desktop so also see the explicit example there for Unity.
+This utility exploits `xdotool` for many use cases which unfortunately
+only works with X11/Xorg based applications. So `xdotool` shortcuts for
+the desktop do not work under GNOME on Wayland which is the default
+since GNOME 3.22. However, it is found that `wmctrl` desktop selection
+commands do work under GNOME on Wayland (via XWayland) so this utility
+adds a built-in `_internal` command which can be used to switch
+workspaces using the swipe commands. The `_internal` `ws_up` and
+`ws_down` commands use `wmctrl` to work out the current workspace and
+select the next one. Since this works on both Wayland and Xorg, and with
+GNOME, KDE, and other EWMH compliant desktops, it is the default
+configuration command for swipe up and down commands in
+`libinput-gestures.conf`. See the comments in that file about other
+options you can do with the `_internal` command. Unfortunately
+`_internal` does not work with Compiz for Ubuntu Unity desktop so also
+see the explicit example there for Unity.
 
 Of course, `xdotool` commands do work via XWayland for Xorg based apps
 so, for example, page forward/back swipe gestures do work for Firefox
@@ -244,6 +281,23 @@ give a total of 8 swipe gestures each at 45 degrees separation. It works
 better than you may expect, at least after some practice. It means you
 can completely manage browser tabs from your touchpad.
 
+### AUTOMATIC STOP/RESTART ON D-BUS EVENTS SUCH AS SUSPEND
+
+There are some situations where you may want to automatically stop,
+start, or restart `libinput-gestures`. E.g. some touchpads have a
+problem which causes `libinput-gestures` (actually the underlying
+`libinput debug-events`) to hang after resuming from a system suspend so
+those users want to stop `libinput-gestures` when a system goes into
+suspend and then start it again with resuming. You can use a companion
+program [`dbus-action`][DBUS] to
+do this. See the example configuration for `libinput-gestures` in the
+default [`dbus-action`][DBUS] [configuration
+file](https://github.com/bulletmark/dbus-action/blob/master/dbus-action.conf).
+
+The [`dbus-action`][DBUS] utility can also be used any similar
+situation, e.g. when you remove/insert a detachable touchpad. It can be
+used to stop, start, or restart `libinput-gestures` on any D-Bus event.
+
 ### TROUBLESHOOTING
 
 Please don't raise a github issue but provide little information about
@@ -257,12 +311,16 @@ configuration you are using, regardless of what the issue is about**.
 
 2. Ensure you have followed the installation instructions here
    carefully. The most common mistake is that you have not added your
-   user to the _input_ group and re-logged in as described above.
+   user to the _input_ group and rebooted your system as described
+   above.
 
 3. Perhaps temporarily remove your custom configuration to try with the
    default configuration.
 
-4. Run `libinput-gestures` on the command line in debug mode while
+4. Run `libinput-gestures-setup status` and confirm it reports the set
+   up that you expect.
+
+5. Run `libinput-gestures` on the command line in debug mode while
    performing some 3 and 4 finger left/right/up/down swipes, and some
    pinch in/outs. In debug mode, configured commands are not executed,
    they are merely output to the screen:
@@ -272,7 +330,7 @@ configuration you are using, regardless of what the issue is about**.
 	(<ctrl-c> to stop)
    ````
 
-5. Run `libinput-gestures` in raw mode by repeating the same commands as
+6. Run `libinput-gestures` in raw mode by repeating the same commands as
    above step but use the `-r` (`--raw`) switch instead of `-d`
    (`--debug`). Raw mode does nothing more than echo the raw gesture
    events received from `libinput debug-events`. If you see `POINTER_*`
@@ -283,11 +341,11 @@ configuration you are using, regardless of what the issue is about**.
    is done completely within libinput, before they get to
    `libinput-gestures`.
 
-6. Search the web for Linux kernel and/or libinput issues relating to
+7. Search the web for Linux kernel and/or libinput issues relating to
    your specific touchpad device and/or laptop/pc. Update your BIOS if
    possible.
 
-7. Be sure that a configured external command works exactly how you want
+8. Be sure that a configured external command works exactly how you want
    when you run it directly on the command line, **before** you configure
    it for `libinput-gestures`. E.g. run `xdotool` manually and
    experiment with various arguments to work out exactly what arguments
@@ -297,7 +355,7 @@ configuration you are using, regardless of what the issue is about**.
    `xdotool` command does not work correctly then there is no point
    raising an `libinput-gestures` issue about it!
 
-8. **If you raise an issue, always include the output of
+9. **If you raise an issue, always include the output of
    `libinput-gestures -l` to show the environment and configuration you
    are using**. If appropriate, also paste the output from steps 4 and 5
    above. If your device is not being recognised by `libinput-gestures`
@@ -318,6 +376,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 Public License at <https://www.gnu.org/licenses/> for more details.
 
 [REPO]: https://github.com/bulletmark/libinput-gestures/
+[DBUS]: https://github.com/bulletmark/dbus-action/
 [AUR]: https://aur.archlinux.org/packages/libinput-gestures/
 [XDOTOOL]: https://www.semicomplete.com/projects/xdotool/
 

@@ -6,6 +6,7 @@ PROG="$(basename $0)"
 NAME=${PROG%-*}
 
 BINDIR="/usr/bin"
+SYSDIR="/usr/lib/systemd/user"
 APPDIR="/usr/share/applications"
 ICOBAS="/usr/share/icons/hicolor"
 ICODIR="$ICOBAS/128x128/apps"
@@ -14,11 +15,13 @@ DOCDIR="/usr/share/doc/$NAME"
 CNFDIR="/etc"
 HCFDIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 AUTDIR="$HCFDIR/autostart"
+SVCFLG="$HCFDIR/.$NAME-is-service"
 
 usage() {
     echo "Usage:"
     echo "As root: sudo $PROG install|uninstall"
-    echo "As user: $PROG start|stop|restart|autostart|autostop|status"
+    echo "As user: $PROG service|desktop|"
+    echo "         start|stop|restart|autostart|autostop|status"
     echo
     echo "-d <dir> (option sets DESTDIR for install/uninstall)"
     echo "-r (force allow root to perform user commands. PLEASE AVOID USING THIS!)"
@@ -46,29 +49,41 @@ cmd="$1"
 
 # Launch given desktop app. First work out most suitable launcher.
 # Pretty crude at present but should work for at least GNOME and KDE.
-launch() {
+de_start() {
     local app="$1"
+    local fullpath="$APPDIR/$app.desktop"
+    local binpath="$BINDIR/$app"
 
-    if echo $XDG_CURRENT_DESKTOP | grep -q KDE; then
-	if hash kioclient5 &>/dev/null; then
-	    kioclient5 exec "$APPDIR/$app.desktop" >/dev/null
-	    return $?
-	elif hash kioclient &>/dev/null; then
-	    kioclient exec "$APPDIR/$app.desktop" >/dev/null
-	    return $?
+    # All the commands we will potentially try ..
+    local cmds=(
+	"kde kioclient5 exec $fullpath"
+	"kde kioclient exec $fullpath"
+	"all gtk-launch $app"
+	"all i3-msg exec $binpath"
+	"all exo-open $fullpath"
+	"all dex $fullpath"
+    )
+
+    local cmdline
+    for cmdline in "${cmds[@]}" ; do
+	IFS=' ' read de cmd args <<< "$cmdline"
+
+        # Skip if the command does not exist
+	if ! hash $cmd &>/dev/null; then
+	    continue
 	fi
-    fi
 
-    if hash gtk-launch &>/dev/null; then
-	gtk-launch "$app"
-	return $?
-    fi
+	# Only try KDE commands on KDE
+	if ! echo $XDG_CURRENT_DESKTOP | grep -q KDE; then
+	    if [[ $de == kde ]]; then
+		continue
+	    fi
+	fi
 
-    if hash i3-msg &>/dev/null; then
-	i3-msg exec $BINDIR/$app >/dev/null
-	# i3-msg will return successfully even if "$app" fails to start
+	# Execute this command
+	$cmd $args &>/dev/null
 	return $?
-    fi
+    done
 
     echo "Don't know how to invoke $app.desktop" >&2
     return 1
@@ -76,7 +91,7 @@ launch() {
 
 # Set up desktop entry link for auto start of app, if it doesn't already
 # exist
-auto_start() {
+de_auto_start() {
     if [[ ! -f $APPDIR/$NAME.desktop ]]; then
 	if [[ -e $AUTDIR/$NAME.desktop ]]; then
 	    echo "Removed old $AUTDIR/$NAME.desktop"
@@ -86,54 +101,117 @@ auto_start() {
     fi
 
     if ! cmp -s $APPDIR/$NAME.desktop $AUTDIR/$NAME.desktop; then
-	mkdir -p $AUTDIR
-	cp $APPDIR/$NAME.desktop $AUTDIR
-	echo "installed or updated $AUTDIR/$NAME.desktop"
+	if mkdir -p $AUTDIR && cp $APPDIR/$NAME.desktop $AUTDIR; then
+	    echo "installed or updated $AUTDIR/$NAME.desktop"
+	fi
     fi
     return 0
 }
 
 # Action given user command
 user_action() {
-    local cmd=$1
+    local cmd="$1"
+    local has_sysd="$2"
+    local svc_enabled="$3"
+    local svc_running="$4"
 
-    if [[ $cmd == start ]]; then
-	if [[ ! -f $APPDIR/$NAME.desktop ]]; then
-	    echo "$NAME is not installed."
+    if [[ $cmd == service ]]; then
+	if [[ $has_sysd -eq 0 ]]; then
+	    echo "Systemd not available, can not run as service."
 	    exit 1
 	fi
-	if launch "$NAME"; then
-	    echo "$NAME started."
+	mkdir -p "$(dirname $SVCFLG)"
+	echo "# This file created by \"$NAME-setup $cmd\" command." >$SVCFLG
+	rm -fv $AUTDIR/$NAME.desktop
+    elif [[ $cmd == desktop ]]; then
+	rm -f $SVCFLG
+    elif [[ $cmd == start ]]; then
+	if [[ -f $SVCFLG ]]; then
+	    if [[ $has_sysd -eq 0 ]]; then
+		echo "Systemd is not installed."
+		exit 1
+	    fi
+	    if systemctl --user start $NAME.service; then
+		echo "$NAME started as a user service."
+	    fi
+	else
+	    if [[ ! -f $APPDIR/$NAME.desktop ]]; then
+		echo "$NAME is not installed."
+		exit 1
+	    fi
+	    if de_start "$NAME"; then
+		echo "$NAME started for desktop."
+	    fi
 	fi
     elif [[ $cmd == stop ]]; then
+	if [[ $svc_running -eq 1 ]]; then
+	    systemctl --user stop $NAME.service
+	    echo "$NAME stopped as a user service."
+	fi
+
 	for prog in libinput-debug-events $NAME; do
 	    if pkill -u $USER -f "$prog\$|$prog " &>/dev/null; then
-		echo "$prog stopped."
+		echo "$prog stopped for desktop."
 	    fi
 	done
     elif [[ $cmd == autostart ]]; then
-	if ! auto_start; then
-	    echo "$NAME is not installed."
-	    exit 1
+	if [[ -f $SVCFLG ]]; then
+	    if [[ $has_sysd -eq 0 ]]; then
+		echo "Systemd is not installed."
+		exit 1
+	    fi
+	    if systemctl --user enable $NAME.service; then
+		echo "$NAME enabled as a user service."
+	    fi
+	    rm -fv $AUTDIR/$NAME.desktop
+	else
+	    if ! de_auto_start; then
+		echo "$NAME is not installed."
+		exit 1
+	    fi
+	    if [[ $has_sysd -eq 1 ]]; then
+		systemctl --user disable $NAME.service &>/dev/null
+	    fi
 	fi
     elif [[ $cmd == autostop ]]; then
+	if [[ $has_sysd -eq 1 ]]; then
+	    systemctl --user disable $NAME.service &>/dev/null
+	fi
 	rm -fv $AUTDIR/$NAME.desktop
     elif [[ $cmd == status ]]; then
-	if [[ -f $APPDIR/$NAME.desktop ]]; then
+	if [[ -f $BINDIR/$NAME ]]; then
 	    echo "$NAME is installed."
 	else
 	    echo "$NAME is not installed."
 	fi
-	if [[ -f $AUTDIR/$NAME.desktop ]]; then
-	    echo "$NAME is set to autostart."
+
+	if [[ -f $SVCFLG ]]; then
+	    echo "$NAME is set up as a user service."
 	else
-	    echo "$NAME is not set to autostart."
+	    echo "$NAME is set up as a desktop application."
 	fi
-	if pgrep -u $USER -f "$NAME\$|$NAME " &>/dev/null; then
-	    echo "$NAME is running."
+
+	if [[ $svc_running -eq 1 ]]; then
+	    echo "$NAME is currently running as a user service."
 	else
-	    echo "$NAME is not running."
+	    if pgrep -u $USER -f "$NAME\$|$NAME " &>/dev/null; then
+		echo "$NAME is currently running as a desktop application."
+	    else
+		echo "$NAME is not currently running."
+	    fi
 	fi
+
+	if [[ $svc_enabled -eq 1 ]]; then
+	    echo "$NAME is set to autostart as a user service."
+	    rm -fv $AUTDIR/$NAME.desktop
+	else
+	    if [[ -f $AUTDIR/$NAME.desktop ]]; then
+		echo "$NAME is set to autostart as a desktop application."
+	    else
+		echo "$NAME is not set to autostart."
+	    fi
+	fi
+
 	if [[ -f $HCFDIR/$NAME.conf ]]; then
 	    echo "$NAME is using custom configuration."
 	else
@@ -141,6 +219,15 @@ user_action() {
 	fi
     else
 	usage
+    fi
+}
+
+# Test if given systemd property is set for service
+sysd_prop() {
+    if systemctl --user show -p $1 $NAME.service | grep -q "=$2$"; then
+	echo 1
+    else
+	echo 0
     fi
 }
 
@@ -153,23 +240,21 @@ if [[ $cmd == install || $cmd == uninstall ]]; then
 
     # Remove any old files from earlier versions of program
     rm -f $DESTDIR$OCODIR/$NAME.png
+    rm -f $DESTDIR$ICODIR/$NAME.png
 
     if [[ $cmd == install ]]; then
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME-setup
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME
+	install -CDv -m 644 -t $DESTDIR$SYSDIR $NAME.service
 	install -CDv -m 644 -t $DESTDIR$APPDIR $NAME.desktop
-	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.png
+	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.svg
 	install -CDv -m 644 -t $DESTDIR$CNFDIR $NAME.conf
 	install -CDv -m 644 -t $DESTDIR$DOCDIR README.md
-
-	# Also install HTML file if markdown is available
-	if hash markdown &>/dev/null; then
-	    markdown -o $DESTDIR$DOCDIR/README.html README.md
-	fi
     else
 	rm -rfv $DESTDIR$BINDIR/$NAME
+	rm -rfv $DESTDIR$SYSDIR/$NAME.service
 	rm -rfv $DESTDIR$APPDIR/$NAME.desktop
-	rm -rfv $DESTDIR$ICODIR/$NAME.png
+	rm -rfv $DESTDIR$ICODIR/$NAME.svg
 	rm -rfv $DESTDIR$CNFDIR/$NAME.conf
 	rm -rfv $DESTDIR$DOCDIR
 	rm -rfv $DESTDIR$BINDIR/$NAME-setup
@@ -203,15 +288,26 @@ else
 	    echo "Removed old $AUTDIR/$NAME.desktop link"
 	    rm -f $AUTDIR/$NAME.desktop
 	fi
-	auto_start
+	de_auto_start
+    fi
+
+    # Test if systemd is installed
+    if type systemctl &>/dev/null; then
+	has_sysd=1
+	svc_enabled=$(sysd_prop UnitFileState enabled)
+	svc_running=$(sysd_prop SubState running)
+    else
+	has_sysd=0
+	svc_enabled=0
+	svc_running=0
     fi
 
     if [[ $cmd == restart ]]; then
-	user_action "stop"
-	user_action "start"
-    else
-	user_action $cmd
+	user_action "stop" $has_sysd $svc_enabled $svc_running
+	cmd=start
     fi
+
+    user_action $cmd $has_sysd $svc_enabled $svc_running
 fi
 
 exit 0
