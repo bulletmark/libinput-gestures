@@ -16,36 +16,39 @@ CNFDIR="/etc"
 HCFDIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 AUTDIR="$HCFDIR/autostart"
 SVCFLG="$HCFDIR/.$NAME-is-service"
+CHECKSECS=6
 
 usage() {
     echo "Usage:"
     echo "As root: sudo $PROG install|uninstall"
-    echo "As user: $PROG service|desktop|"
-    echo "         start|stop|restart|autostart|autostop|status"
+    echo "  -d <dir> (option sets DESTDIR for install/uninstall)"
     echo
-    echo "-d <dir> (option sets DESTDIR for install/uninstall)"
-    echo "-r (force allow root to perform user commands. PLEASE AVOID USING THIS!)"
+    echo "As user: $PROG command [command ..]"
+    echo "  where command is any of:"
+    echo "  start|stop|restart|autostart|autostop|status"
+    echo
     exit 1
 }
 
 # Process command line options
 DESTDIR=""
-FORCEROOT=0
-while getopts d:r c; do
+while getopts d: c; do
     case $c in
     d) DESTDIR="$OPTARG";;
-    r) FORCEROOT=1;;
     \?) usage;;
     esac
 done
 
 shift $((OPTIND - 1))
 
-if [[ $# -ne 1 ]]; then
-    usage
-fi
-
-cmd="$1"
+# Test if given systemd property is set for given unit
+sysd_prop() {
+    if systemctl --user show -p "$2" "$1" 2>/dev/null | grep -q "=$3$"; then
+	echo 1
+    else
+	echo 0
+    fi
+}
 
 # Launch given desktop app. First work out most suitable launcher.
 # Pretty crude at present but should work for at least GNOME and KDE.
@@ -111,12 +114,19 @@ de_auto_start() {
 # Action given user command
 user_action() {
     local cmd="$1"
-    local has_sysd="$2"
-    local svc_enabled="$3"
-    local svc_running="$4"
+    local pidfile=/tmp/$NAME-$USER.pid
+
+    # Test if systemd is enabled/running
+    if [[ $HAS_SYSD -eq 1 ]]; then
+	svc_enabled=$(sysd_prop $NAME.service UnitFileState enabled)
+	svc_running=$(sysd_prop $NAME.service SubState running)
+    else
+	svc_enabled=0
+	svc_running=0
+    fi
 
     if [[ $cmd == service ]]; then
-	if [[ $has_sysd -eq 0 ]]; then
+	if [[ $HAS_SYSD -eq 0 ]]; then
 	    echo "Systemd not available, can not run as service."
 	    exit 1
 	fi
@@ -125,14 +135,18 @@ user_action() {
 	rm -fv $AUTDIR/$NAME.desktop
     elif [[ $cmd == desktop ]]; then
 	rm -f $SVCFLG
+	if [[ $HAS_SYSD -eq 1 ]]; then
+	    systemctl --user disable $NAME.service &>/dev/null
+	fi
     elif [[ $cmd == start ]]; then
+	STARTAS=""
 	if [[ -f $SVCFLG ]]; then
-	    if [[ $has_sysd -eq 0 ]]; then
-		echo "Systemd is not installed."
+	    if [[ $HAS_SYSD -eq 0 ]]; then
+		echo "Systemd service is not available."
 		exit 1
 	    fi
 	    if systemctl --user start $NAME.service; then
-		echo "$NAME started as a user service."
+		STARTAS="user service"
 	    fi
 	else
 	    if [[ ! -f $APPDIR/$NAME.desktop ]]; then
@@ -140,41 +154,84 @@ user_action() {
 		exit 1
 	    fi
 	    if de_start "$NAME"; then
-		echo "$NAME started for desktop."
+		STARTAS="desktop application"
+	    fi
+	fi
+
+	if [[ -n $STARTAS ]]; then
+	    # Wait some time to start ..
+	    done=0
+	    for _ in $(seq $CHECKSECS); do
+		sleep 1
+		if ps "$(head -1 $pidfile 2>/dev/null)" &>/dev/null; then
+		    done=1
+		    break
+		fi
+	    done
+
+	    if [[ $done -eq 1 ]]; then
+		echo "$NAME started as a $STARTAS".
+	    else
+		echo "$NAME failed to start as a $STARTAS". >&2
 	    fi
 	fi
     elif [[ $cmd == stop ]]; then
+	STARTAS=""
 	if [[ $svc_running -eq 1 ]]; then
 	    systemctl --user stop $NAME.service
-	    echo "$NAME stopped as a user service."
+	    STARTAS="user service"
+	else
+	    if [[ -f $pidfile ]]; then
+		local killed=0
+		while read pid; do
+		    if kill $pid &>/dev/null; then
+			killed=1
+		    fi
+		done <$pidfile
+		if [[ $killed -ne 0 ]]; then
+		    STARTAS="desktop application"
+		fi
+	    fi
 	fi
 
-	for prog in libinput-debug-events $NAME; do
-	    if pkill -u $USER -f "$prog\$|$prog " &>/dev/null; then
-		echo "$prog stopped for desktop."
+	if [[ -n $STARTAS ]]; then
+	    # Wait some time to stop ..
+	    done=0
+	    for _ in $(seq $CHECKSECS); do
+		sleep 1
+		if ! ps "$(head -1 $pidfile 2>/dev/null)" &>/dev/null; then
+		    done=1
+		    break
+		fi
+	    done
+
+	    if [[ $done -eq 1 ]]; then
+		echo "$NAME stopped $STARTAS".
+	    else
+		echo "$NAME failed to stop $STARTAS". >&2
 	    fi
-	done
+	fi
     elif [[ $cmd == autostart ]]; then
+	if [[ $HAS_SYSD -eq 1 ]]; then
+	    # Be sure to remove any old systemd links ..
+	    systemctl --user disable $NAME.service &>/dev/null
+	fi
 	if [[ -f $SVCFLG ]]; then
-	    if [[ $has_sysd -eq 0 ]]; then
-		echo "Systemd is not installed."
+	    if [[ $HAS_SYSD -eq 0 ]]; then
+		echo "Systemd service is not available."
 		exit 1
 	    fi
+
 	    if systemctl --user enable $NAME.service; then
 		echo "$NAME enabled as a user service."
 	    fi
 	    rm -fv $AUTDIR/$NAME.desktop
-	else
-	    if ! de_auto_start; then
-		echo "$NAME is not installed."
-		exit 1
-	    fi
-	    if [[ $has_sysd -eq 1 ]]; then
-		systemctl --user disable $NAME.service &>/dev/null
-	    fi
+	elif ! de_auto_start; then
+	    echo "$NAME is not installed."
+	    exit 1
 	fi
     elif [[ $cmd == autostop ]]; then
-	if [[ $has_sysd -eq 1 ]]; then
+	if [[ $HAS_SYSD -eq 1 ]]; then
 	    systemctl --user disable $NAME.service &>/dev/null
 	fi
 	rm -fv $AUTDIR/$NAME.desktop
@@ -193,12 +250,10 @@ user_action() {
 
 	if [[ $svc_running -eq 1 ]]; then
 	    echo "$NAME is currently running as a user service."
+	elif ps "$(head -1 $pidfile 2>/dev/null)" &>/dev/null; then
+	    echo "$NAME is currently running as a desktop application."
 	else
-	    if pgrep -u $USER -f "$NAME\$|$NAME " &>/dev/null; then
-		echo "$NAME is currently running as a desktop application."
-	    else
-		echo "$NAME is not currently running."
-	    fi
+	    echo "$NAME is not currently running."
 	fi
 
 	if [[ $svc_enabled -eq 1 ]]; then
@@ -213,29 +268,25 @@ user_action() {
 	fi
 
 	if [[ -f $HCFDIR/$NAME.conf ]]; then
-	    echo "$NAME is using custom configuration."
+	    echo "$NAME is using custom configuration file."
 	else
-	    echo "$NAME is using default configuration."
+	    echo "$NAME is using default configuration file."
 	fi
     else
-	usage
+	echo "ERROR: \"$cmd\" is not a valid user command" >&2
     fi
 }
 
-# Test if given systemd property is set for service
-sysd_prop() {
-    if systemctl --user show -p $1 $NAME.service | grep -q "=$2$"; then
-	echo 1
-    else
-	echo 0
-    fi
-}
-
+cmd="$1"
 if [[ $cmd == install || $cmd == uninstall ]]; then
     DESTDIR="${DESTDIR%%+(/)}"
     if [[ -z $DESTDIR && $(id -un) != root ]]; then
 	echo "Install or uninstall must be run as sudo/root."
 	exit 1
+    fi
+
+    if [[ $# -ne 1 ]]; then
+	usage
     fi
 
     # Remove any old files from earlier versions of program
@@ -269,9 +320,26 @@ if [[ $cmd == install || $cmd == uninstall ]]; then
 	fi
     fi
 else
-    if [[ $(id -un) == root && $FORCEROOT == 0 ]]; then
+    if [[ $(id -un) == root ]]; then
 	echo "Non-installation commands must be run as your own user."
 	exit 1
+    fi
+
+    # Test if systemd is installed
+    if type systemctl &>/dev/null; then
+	HAS_SYSD=$(sysd_prop graphical-session.target ActiveState active)
+    else
+	HAS_SYSD=0
+    fi
+
+    if [[ $HAS_SYSD -eq 1 ]]; then
+	# Reload systemd if service file has been updated
+	if systemctl --user status $NAME.service 2>&1 |
+	    grep -q ' changed on disk'; then
+	    echo "$NAME.service has changed, reloading systemd user daemon .."
+	    systemctl --user daemon-reload
+	    sleep 2
+	fi
     fi
 
     # Remove any old configuration from earlier versions of program
@@ -291,23 +359,15 @@ else
 	de_auto_start
     fi
 
-    # Test if systemd is installed
-    if type systemctl &>/dev/null; then
-	has_sysd=1
-	svc_enabled=$(sysd_prop UnitFileState enabled)
-	svc_running=$(sysd_prop SubState running)
-    else
-	has_sysd=0
-	svc_enabled=0
-	svc_running=0
-    fi
+    # Execute each command given on command line ..
+    for cmd in "$@"; do
+	if [[ $cmd == restart ]]; then
+	    user_action "stop"
+	    cmd=start
+	fi
 
-    if [[ $cmd == restart ]]; then
-	user_action "stop" $has_sysd $svc_enabled $svc_running
-	cmd=start
-    fi
-
-    user_action $cmd $has_sysd $svc_enabled $svc_running
+	user_action "$cmd"
+    done
 fi
 
 exit 0

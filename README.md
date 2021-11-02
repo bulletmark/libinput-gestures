@@ -22,7 +22,7 @@ on Xorg and Wayland. It works somewhat incompletely on Wayland (via
 XWayland). See the WAYLAND section below and the comments in the default
 `libinput-gestures.conf` file. It has been [reported to work with
 KDE](http://www.lorenzobettini.it/2017/02/touchpad-gestures-in-linux-kde-with-libinput-gestures/).
-I am not sure how well this will work on all distros and DE's etc.
+I am not sure how well this will work on all Linux systems and DE's etc.
 
 The latest version and documentation is available at
 https://github.com/bulletmark/libinput-gestures.
@@ -78,8 +78,7 @@ calls gestures](https://wayland.freedesktop.org/libinput/doc/latest/gestures.htm
 Many users will be happy with the default configuration in which case
 you can just type the following and you are ready to go:
 
-    libinput-gestures-setup autostart
-    libinput-gestures-setup start
+    libinput-gestures-setup autostart start
 
 Otherwise, if you want to create your own custom gestures etc, keep
 reading ..
@@ -103,6 +102,7 @@ and options described in that file. The available gestures are:
 |`pinch out`           |GNOME open/close overview |
 |`pinch clockwise`     ||
 |`pinch anticlockwise` ||
+|`hold on` ([available since libinput 1.19](#hold-gestures)) |Open new web browser tab |
 
 NOTE: If you don't use "natural" scrolling direction for your touchpad
 then you may want to swap the default left/right and up/down
@@ -158,9 +158,15 @@ You must choose between starting the application as a [systemd user
 service](https://wiki.archlinux.org/index.php/Systemd/User), or as a
 [desktop
 application](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html)
-(with an XDG compliant DE such as GNOME and KDE). The systemd user service
-option for `libinput-gestures` was added in Feb 2021 and provides more
-robust management and better logging than the desktop so is now the preferred choice.
+(with an XDG compliant DE such as GNOME and KDE). The systemd user
+service option for `libinput-gestures` was added in Feb 2021 and
+provides more robust management and better logging than the desktop so
+is the preferred choice if your system is recent and your DM/DE supports
+it. Note that some environments [do not correctly start the systemd
+user
+service](https://github.com/bulletmark/libinput-gestures/issues/305) so
+you will have to choose the desktop option in that case.
+
 Choose one of the two following options:
 
 1. To set up the application as a [systemd user
@@ -177,7 +183,7 @@ libinput-gestures-setup service
 libinput-gestures-setup desktop
 ````
 
-After *choosing one of the above*, you can use then run the following commands:
+After choosing one of the above, you can use then run the following commands:
 
 Enable the app to start automatically in the background when you
 log in with:
@@ -204,12 +210,18 @@ Check the status of the app with:
 
     libinput-gestures-setup status
 
-Note if you are starting using the DE option and you are using some
-uncommon systems then `libinput-gestures-setup start` may fail
-to start the application returning you a message _Don't know how to
-invoke libinput-gestures.desktop_. If you get this error message,
-install the dex package, preferably from your system packages
-repository, and try again.
+You can specify multiple user commands to `libinput-gestures-setup` to
+action in sequence. E.g. to shutdown and change from a desktop
+installation to running service installation type:
+
+    libinput-gestures-setup stop service autostart start
+
+Note if you are starting using the desktop option and you are using some
+uncommon systems then `libinput-gestures-setup start` may fail to start
+the application returning you a message _Don't know how to invoke
+libinput-gestures.desktop_. If you get this error message, install the
+dex package, preferably from your system packages repository, and try
+again.
 
 ### UPGRADE
 
@@ -220,8 +232,7 @@ repository, and try again.
 
 ### REMOVAL
 
-    libinput-gestures-setup stop
-    libinput-gestures-setup autostop
+    libinput-gestures-setup stop autostop
     sudo libinput-gestures-setup uninstall
 
 ### WAYLAND AND OTHER NOTES
@@ -247,17 +258,24 @@ so, for example, page forward/back swipe gestures do work for Firefox
 and Chrome browsers when running on Wayland as per the default
 configuration.
 
-Note that GNOME on Wayland natively implements the following gestures:
+Note if you run `libinput-gestures` on GNOME with Wayland, be sure to
+change or disable the your `libinput-gestures.conf` configured gestures
+to not clash with the native gestures.
+
+GNOME 40.0 and later on Wayland natively implements the following
+gestures:
+
+- 3 finger swipe up/down opens the GNOME overview.
+- 3 finger swipe left/right changes workspaces
+
+GNOME 40.0 does not use 4 finger gestures so you can freely assign them
+using libinput-gestures.
+
+GNOME 3.38 on Wayland and earlier natively implements the following
+gestures:
 
 - 3 finger pinch opens/close the GNOME overview.
-- 4 finger swipe up/down changes workspaces.
-
-So if you choose to run `libinput-gestures` on Wayland, be sure to
-change or disable the your `libinput-gestures.conf` pinch and swipe
-up/down gestures to not clash with these. E.g, configure your
-`libinput-gestures.conf` pinch gestures for only 2 fingers, and the
-swipe up/down for only 3 fingers so they work independently of the
-native gestures.
+- 4 finger swipe up/down changes workspaces
 
 GNOME on Xorg does not natively implement any gestures.
 
@@ -280,6 +298,21 @@ each at 90 degrees separation, you can add the above extra 4 swipes to
 give a total of 8 swipe gestures each at 45 degrees separation. It works
 better than you may expect, at least after some practice. It means you
 can completely manage browser tabs from your touchpad.
+
+### HOLD GESTURES
+
+Libinput version 1.19.0 added [HOLD
+gestures](https://wayland.freedesktop.org/libinput/doc/latest/gestures.html#hold-gestures)
+to augment the standard SWIPE and PINCH gestures. They are actioned with
+1 or more fingers and are simply set ON as a trigger. They are not as
+versatile as the other gestures but they are a distinct new gesture so
+`libinput-gestures` does interpret them and map them to commands you can
+configure in your `libinput-gestures.conf`, e.g:
+
+    gesture hold on 4 xdotool key control+t
+
+The above gesture will open a new tab in your browser if you rest 4
+fingers statically on the window.
 
 ### AUTOMATIC STOP/RESTART ON D-BUS EVENTS SUCH AS SUSPEND
 
@@ -337,9 +370,8 @@ configuration you are using, regardless of what the issue is about**.
    events but no `GESTURE_*` events then unfortunately your touchpad
    and/or libinput combination can report simple finger movements but
    does not report multi-finger gestures so `libinput-gestures` will not
-   work. Also note that discrimination of `SWIPE` and `PINCH` gestures
-   is done completely within libinput, before they get to
-   `libinput-gestures`.
+   work. Also note that discrimination of gestures is done completely
+   within libinput, before they get to `libinput-gestures`.
 
 7. Search the web for Linux kernel and/or libinput issues relating to
    your specific touchpad device and/or laptop/pc. Update your BIOS if

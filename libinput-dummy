@@ -1,0 +1,17 @@
+#!/bin/bash
+# Hack stub to dummy output from libinput debug-events from a file.
+# Used to help diagnose issues. M.Blakeney, Jul 2021.
+
+if [[ $1 == 'install' ]]; then
+    ln -sfv $PWD/$0 $HOME/bin/libinput
+    exit
+elif [[ $1 == 'rm' || $1 == 'remove' || $1 == uninstall ]]; then
+    rm -fv $HOME/bin/libinput
+    exit
+elif [[ $1 == '--version' ]]; then
+    exec /usr/bin/libinput --version
+elif [[ $1 == 'list-devices' ]]; then
+    exec /usr/bin/libinput list-devices
+fi
+
+cat libinput-dummy.txt

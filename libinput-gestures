@@ -57,15 +57,17 @@ timeoutv = DEFAULT_TIMEOUT
 ROTATE_ANGLE = 15.0
 
 def open_lock(*args):
-    'Create a lock based on given list of arguments'
+    'Create lock/pid files based on given list of arguments'
     # We use exclusive assess to a file for this
-    fp = Path('/tmp', '-'.join(args) + '.lock').open('w')
+    fname = Path('/tmp', '-'.join(args))
+    flock = fname.with_suffix('.lock').open('w')
     try:
-        fcntl.lockf(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.lockf(flock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError:
-        return None
+        return None, None
 
-    return fp
+    fpid = fname.with_suffix('.pid').open('w')
+    return flock, fpid
 
 def run(cmd, *, check=True, block=True):
     'Run function and return standard output, Popen() handle, or None'
@@ -380,7 +382,7 @@ class GESTURE:
 
         # If any extended gestures configured then set flag to enable
         # their discrimination
-        if self.extended_text in motion:
+        if self.extended_text and self.extended_text in motion:
             self.has_extended = True
         key = (motion, fingers) if fingers else motion
         
@@ -520,6 +522,19 @@ class PINCH(GESTURE):
             self.action('clockwise' if angle >= 0.0 else 'anticlockwise')
         elif ratio != 0.0:
             self.action('in' if ratio <= 0.0 else 'out')
+
+@add_gesture_handler
+class HOLD(GESTURE):
+    'Class to handle this type of gesture'
+    SUPPORTED_MOTIONS = ('on',)
+    extended_text = None
+
+    def update(self, coords):
+        return True
+
+    def end(self):
+        'Action this gesture at the end of a motion sequence'
+        self.action('on')
 
 # Table of configuration commands
 conf_commands = OrderedDict()
@@ -669,6 +684,12 @@ def lockcheck():
 
     GLib.MainLoop().run()
 
+def gethash():
+    'Return a crude hash identifier for this software version'
+    progs = (PROGPATH, PROGPATH.with_name(PROGNAME + '-setup'))
+    return hashlib.md5(b''.join(p.read_bytes() for p in progs if
+        p.exists())).hexdigest()
+
 def main():
     global args, abzsquare
 
@@ -717,8 +738,7 @@ def main():
             platform.python_version(), libvers))
 
         # Output hash version/checksum of this program
-        vers = hashlib.md5(PROGPATH.read_bytes()).hexdigest()
-        print('{}: hash {}'.format(PROGPATH, vers))
+        print('Hash: {}'.format(gethash()))
 
     # Read and process the conf file
     confname = read_conf(args.conffile, CONFNAME)
@@ -758,12 +778,15 @@ def main():
 
     # If just called to list out above environment info then exit now
     if args.list:
+        status = run((PROGNAME + '-setup', 'status'), check=False)
+        if status:
+            print(status.strip())
         sys.exit()
 
     # Make sure only one instance running for current user
     user = getpass.getuser()
-    proglock = open_lock(PROGNAME, user)
-    if not proglock:
+    lockfile, pidfile = open_lock(PROGNAME, user)
+    if not lockfile:
         sys.exit('{} is already running for {}, terminating ..'.format(
             PROGNAME, user))
 
@@ -782,6 +805,11 @@ def main():
 
     cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
             bufsize=1, universal_newlines=True)
+
+    # Store PIDs for potential kill
+    pidfile.write('{}\n{}\n'.format(os.getpid(), cmd.pid))
+    pidfile.flush()
+    os.fsync(pidfile.fileno())
 
     # Sit in a loop forever reading the libinput messages ..
     handler = None
