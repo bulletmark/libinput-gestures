@@ -35,7 +35,7 @@ _libinput_ release 1.0 or later.
 You **must be a member of the _input_ group** to have permission
 to read the touchpad device:
 
-    sudo gpasswd -a $USER input
+    sudo gpasswd -a $USER input && newgrp input
 
 After executing the above command, reboot your system.
 
