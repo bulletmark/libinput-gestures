@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'Read gestures from libinput touchpad and action shell commands.'
+"""Read gestures from libinput touchpad and action shell commands."""
 # Mark Blakeney, Sep 2015.
 import os
 import sys
@@ -55,8 +55,9 @@ timeoutv = DEFAULT_TIMEOUT
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
 
+
 def open_lock(*args):
-    'Create lock/pid files based on given list of arguments'
+    """Create lock/pid files based on given list of arguments"""
     # We use exclusive assess to a file for this
     fname = Path('/tmp', '-'.join(args))
     flock = fname.with_suffix('.lock').open('w')
@@ -68,12 +69,13 @@ def open_lock(*args):
     fpid = fname.with_suffix('.pid').open('w')
     return flock, fpid
 
+
 def run(cmd, *, check=True, block=True):
-    'Run function and return standard output, Popen() handle, or None'
+    """Run function and return standard output, Popen() handle, or None"""
     try:
         if block:
             result = subprocess.check_output(cmd, universal_newlines=True,
-                    stderr=(None if check else subprocess.DEVNULL))
+                                             stderr=(None if check else subprocess.DEVNULL))
         else:
             result = bool(subprocess.Popen(cmd))
     except Exception as e:
@@ -83,8 +85,9 @@ def run(cmd, *, check=True, block=True):
 
     return result
 
+
 def get_libinput_vers():
-    'Return the libinput installed version number string'
+    """Return the libinput installed version number string"""
     # Try to use newer libinput interface then fall back to old
     # (depreciated) interface.
     res = run(('libinput', '--version'), check=False)
@@ -94,8 +97,9 @@ def get_libinput_vers():
     res = run(('libinput-list-devices', '--version'), check=False)
     return res and res.strip(), False
 
+
 def get_devices_list(cmd_list_devices, device_list):
-    'Get list of devices and their attributes (as a dict) from libinput'
+    """Get list of devices and their attributes (as a dict) from libinput"""
     if device_list:
         with open(device_list) as fd:
             stdout = fd.read()
@@ -117,13 +121,14 @@ def get_devices_list(cmd_list_devices, device_list):
         if dev:
             yield dev
 
+
 def get_device_info(name, cmd_list_devices, device_list):
-    'Determine libinput touchpad device and return device info'
+    """Determine libinput touchpad device and return device info"""
     devices = list(get_devices_list(cmd_list_devices, device_list))
 
     if not devices:
         print('Can not see any devices, did you add yourself to the '
-                'input group and reboot?', file=sys.stderr)
+              'input group and reboot?', file=sys.stderr)
         return None
 
     # If a specific device name was asked for then return that device
@@ -157,8 +162,9 @@ def get_device_info(name, cmd_list_devices, device_list):
     # Give up
     return None
 
+
 def get_device(name, cmd_list_devices, device_list):
-    'Determine libinput touchpad device and add fixed path info'
+    """Determine libinput touchpad device and add fixed path info"""
     dev = get_device_info(name, cmd_list_devices, device_list)
     if dev:
         devname = dev.get('kernel')
@@ -181,11 +187,13 @@ def get_device(name, cmd_list_devices, device_list):
 
         dev['_path'] = devname
         dev['_diag'] = '{}{}: {}'.format(devname, evname,
-                dev.get('device', '?'))
+                                         dev.get('device', '?'))
     return dev
 
+
 class COMMAND:
-    'Generic command handler'
+    """Generic command handler"""
+
     def __init__(self, args):
         self.reprstr = ' '.join(args)
 
@@ -194,38 +202,43 @@ class COMMAND:
         self.argslist = args
 
     def run(self):
-        'Run this command + arguments'
+        """Run this command + arguments"""
         run(self.argslist, block=False)
 
     def __str__(self):
-        'Return string representation'
+        """Return string representation"""
         return self.reprstr
+
 
 # Table of internal commands
 internal_commands = OrderedDict()
 
+
 def add_internal_command(cls):
-    'Add configuration command to command lookup table based on name'
+    """Add configuration command to command lookup table based on name"""
     internal_commands[re.sub('^COMMAND', '', cls.__name__)] = cls
 
+
 class ArgumentParser(argparse.ArgumentParser):
-    'Custom ArgumentParser to return error text'
+    """Custom ArgumentParser to return error text"""
+
     def error(self, msg):
-        raise(Exception(msg))
+        raise (Exception(msg))
+
 
 @add_internal_command
 class COMMAND_internal(COMMAND):
-    'Internal command handler.'
+    """Internal command handler."""
     # Commands currently supported follow. Each is configured with the
     # (X,Y) translation to be applied to the desktop grid.
     commands = (
-        ('ws_up',         ( 0,  1)),  # noqa: E241,E201
-        ('ws_down',       ( 0, -1)),  # noqa: E241,E201
-        ('ws_left',       ( 1,  0)),  # noqa: E241,E201
-        ('ws_right',      (-1,  0)),  # noqa: E241,E201
-        ('ws_left_up',    ( 1,  1)),  # noqa: E241,E201
-        ('ws_left_down',  ( 1, -1)),  # noqa: E241,E201
-        ('ws_right_up',   (-1,  1)),  # noqa: E241,E201
+        ('ws_up', (0, 1)),  # noqa: E241,E201
+        ('ws_down', (0, -1)),  # noqa: E241,E201
+        ('ws_left', (1, 0)),  # noqa: E241,E201
+        ('ws_right', (-1, 0)),  # noqa: E241,E201
+        ('ws_left_up', (1, 1)),  # noqa: E241,E201
+        ('ws_left_down', (1, -1)),  # noqa: E241,E201
+        ('ws_right_up', (-1, 1)),  # noqa: E241,E201
         ('ws_right_down', (-1, -1)),  # noqa: E241,E201
     )
 
@@ -236,19 +249,19 @@ class COMMAND_internal(COMMAND):
     CMDSET = 'wmctrl -s'.split()
 
     def __init__(self, args):
-        'Action internal swipe commands'
+        """Action internal swipe commands"""
         super().__init__(args)
 
         # Set up command line arguments
         opt = ArgumentParser(prog=self.argslist[0], description=self.__doc__)
         opt.add_argument('-w', '--wrap', action='store_true',
-                help='wrap workspaces when switching to/from start/end')
+                         help='wrap workspaces when switching to/from start/end')
         opt.add_argument('-c', '--cols', type=int,
-                help='number of columns in virtual desktop grid, default=1')
+                         help='number of columns in virtual desktop grid, default=1')
         opt.add_argument('--row', type=int, default=0, help=argparse.SUPPRESS)
         opt.add_argument('--col', type=int, default=0, help=argparse.SUPPRESS)
         opt.add_argument('action', choices=self.commands_list,
-                help='Internal command to action')
+                         help='Internal command to action')
         args = opt.parse_args(self.argslist[1:])
         self.nowrap = not args.wrap
         self.rows = 0
@@ -293,7 +306,7 @@ class COMMAND_internal(COMMAND):
         self.xmove, self.ymove = self.commands[cmdi][1]
 
     def run(self, block=False):
-        'Get list of current workspaces and select next one'
+        """Get list of current workspaces and select next one"""
         stdout = run(self.CMDLIST, check=False)
         if not stdout:
             # This command can fail on GNOME when you have only a single
@@ -355,29 +368,37 @@ class COMMAND_internal(COMMAND):
 
         # Switch to desired workspace
         return run(self.CMDSET + [str(index)], block=block) \
-                if index != start else None
+            if index != start else None
+
 
 # Table of gesture handlers
 handlers = OrderedDict()
 
+
 def add_gesture_handler(cls):
-    'Create gesture handler instance and add to lookup table based on name'
+    """Create gesture handler instance and add to lookup table based on name"""
     handlers[cls.__name__] = cls()
 
+
 class GESTURE:
-    'Abstract base class for handling for gestures'
+    """Abstract base class for handling for gestures"""
+
+    fingers = 0
+    data = [0.0, 0.0]
+    starttime = monotonic()
+
     def __init__(self):
-        'Initialise this gesture at program start'
+        """Initialise this gesture at program start"""
         self.name = type(self).__name__
         self.motions = OrderedDict()
         self.has_extended = False
 
     def add(self, motion, fingers, command):
-        'Add a configured motion command for this gesture'
+        """Add a configured motion command for this gesture"""
         if motion not in self.SUPPORTED_MOTIONS:
             return 'Gesture {} does not support motion "{}".\n' \
-                    'Must be "{}"'.format(self.name.lower(), motion,
-                            '" or "'.join(self.SUPPORTED_MOTIONS))
+                   'Must be "{}"'.format(self.name.lower(), motion,
+                                         '" or "'.join(self.SUPPORTED_MOTIONS))
         if not command:
             return 'No command configured'
 
@@ -403,19 +424,18 @@ class GESTURE:
         return None
 
     def begin(self, fingers):
-        'Initialise this gesture at the start of motion'
+        """Initialise this gesture at the start of motion"""
         self.fingers = fingers
         self.data = [0.0, 0.0]
         self.starttime = monotonic()
 
     def action(self, motion):
-        'Action a motion command for this gesture'
-        command = self.motions.get((motion, self.fingers)) or \
-                self.motions.get(motion)
+        """Action a motion command for this gesture"""
+        command = self.motions.get((motion, self.fingers)) or self.motions.get(motion)
 
         if args.verbose:
             print('{}: {} {} {} {}'.format(PROGNAME, self.name, motion,
-                self.fingers, self.data))
+                                           self.fingers, self.data))
             if command:
                 print('  ', command)
 
@@ -427,15 +447,16 @@ class GESTURE:
         if command and not args.debug:
             command.run()
 
+
 @add_gesture_handler
 class SWIPE(GESTURE):
-    'Class to handle this type of gesture'
+    """Class to handle this type of gesture"""
     SUPPORTED_MOTIONS = ('left', 'right', 'up', 'down',
-            'left_up', 'right_up', 'left_down', 'right_down')
+                         'left_up', 'right_up', 'left_down', 'right_down')
     extended_text = '_'
 
     def update(self, coords):
-        'Update this gesture for a motion'
+        """Update this gesture for a motion"""
         # Ignore this update if we can not parse the numbers we expect
         try:
             x = float(coords[2])
@@ -448,13 +469,13 @@ class SWIPE(GESTURE):
         return True
 
     def end(self):
-        'Action this gesture at the end of a motion sequence'
+        """Action this gesture at the end of a motion sequence"""
         x, y = self.data
         abx = abs(x)
         aby = abs(y)
 
         # Require absolute distance movement beyond a small thresh-hold.
-        if abx**2 + aby**2 < abzsquare:
+        if abx ** 2 + aby ** 2 < abzsquare:
             return
 
         # Discriminate left/right or up/down.
@@ -471,14 +492,19 @@ class SWIPE(GESTURE):
 
         self.action(motion)
 
+
 @add_gesture_handler
 class PINCH(GESTURE):
-    'Class to handle this type of gesture'
+    """Class to handle this type of gesture"""
     SUPPORTED_MOTIONS = ('in', 'out', 'clockwise', 'anticlockwise')
     extended_text = 'clock'
+    # spaces updates
+    counter = 0
+    # Skips 15 updates before executing the preferred command
+    skip = 12
 
     def update(self, coords):
-        'Update this gesture for a motion'
+        """Update this gesture for a motion"""
         # Ignore this update if we can not parse the numbers we expect
         try:
             x = float(coords[4])
@@ -488,10 +514,20 @@ class PINCH(GESTURE):
 
         self.data[0] += x - 1.0
         self.data[1] += y
+
+        if self.counter >= self.skip:
+            self.execute()
+            self.counter = 0
+        else:
+            self.counter += 1
+
         return True
 
     def end(self):
-        'Action this gesture at the end of a motion sequence'
+        self.execute()
+
+    def execute(self):
+        """Action this gesture at the end of a motion sequence"""
         ratio, angle = self.data
 
         if self.has_extended and abs(angle) > ROTATE_ANGLE:
@@ -499,9 +535,10 @@ class PINCH(GESTURE):
         elif ratio != 0.0:
             self.action('in' if ratio <= 0.0 else 'out')
 
+
 @add_gesture_handler
 class HOLD(GESTURE):
-    'Class to handle this type of gesture'
+    """Class to handle this type of gesture"""
     SUPPORTED_MOTIONS = ('on',)
     extended_text = None
 
@@ -509,19 +546,22 @@ class HOLD(GESTURE):
         return True
 
     def end(self):
-        'Action this gesture at the end of a motion sequence'
+        """Action this gesture at the end of a motion sequence"""
         self.action('on')
+
 
 # Table of configuration commands
 conf_commands = OrderedDict()
 
+
 def add_conf_command(func):
-    'Add configuration command to command lookup table based on name'
+    """Add configuration command to command lookup table based on name"""
     conf_commands[re.sub('^conf_', '', func.__name__)] = func
+
 
 @add_conf_command
 def conf_gesture(lineargs):
-    'Process a single gesture line in conf file'
+    """Process a single gesture line in conf file"""
     fields = lineargs.split(maxsplit=2)
 
     # Look for configured gesture. Sanity check the line.
@@ -533,7 +573,7 @@ def conf_gesture(lineargs):
 
     if not handler:
         return 'Gesture "{}" is not supported.\nMust be "{}"'.format(
-                gesture, '" or "'.join([h.lower() for h in handlers]))
+            gesture, '" or "'.join([h.lower() for h in handlers]))
 
     # Gesture command can be configured with optional specific finger
     # count so look for that
@@ -546,18 +586,20 @@ def conf_gesture(lineargs):
     # Add the configured gesture
     return handler.add(motion.lower(), fingers, command)
 
+
 @add_conf_command
 def conf_device(lineargs):
-    'Process a single device line in conf file'
+    """Process a single device line in conf file"""
     # Command line overrides configuration file
     if not args.device:
         args.device = lineargs
 
     return None if args.device else 'No device specified'
 
+
 @add_conf_command
 def swipe_threshold(lineargs):
-    'Change swipe threshold'
+    """Change swipe threshold"""
     global swipe_min_threshold
     try:
         swipe_min_threshold = int(lineargs)
@@ -566,9 +608,10 @@ def swipe_threshold(lineargs):
 
     return None if swipe_min_threshold >= 0 else 'Must be >= 0'
 
+
 @add_conf_command
 def timeout(lineargs):
-    'Change gesture timeout'
+    """Change gesture timeout"""
     global timeoutv
     try:
         timeoutv = float(lineargs)
@@ -577,8 +620,9 @@ def timeout(lineargs):
 
     return None if timeoutv >= 0 else 'Must be >= 0'
 
+
 def get_conf_line(line):
-    'Process a single line in conf file'
+    """Process a single line in conf file"""
     key, *argslist = line.split(maxsplit=1)
 
     # Old format conf files may have a ":" appended to the key
@@ -587,12 +631,13 @@ def get_conf_line(line):
 
     if not conf_func:
         return 'Configuration command "{}" is not supported.\n' \
-                'Must be "{}"'.format(key, '" or "'.join(conf_commands))
+               'Must be "{}"'.format(key, '" or "'.join(conf_commands))
 
     return conf_func(argslist[0] if argslist else '')
 
+
 def get_conf(conffile, confname):
-    'Read given configuration file and store internal actions etc'
+    """Read given configuration file and store internal actions etc"""
     with conffile.open() as fp:
         for num, line in enumerate(fp, 1):
             line = line.strip()
@@ -604,8 +649,9 @@ def get_conf(conffile, confname):
                 sys.exit('Error at line {} in file {}:\n>> {} <<\n{}.'.format(
                     num, confname, line, errmsg))
 
+
 def unexpanduser(cfile):
-    'Return absolute path name, with $HOME replaced by ~'
+    """Return absolute path name, with $HOME replaced by ~"""
     relslash = Path(os.path.abspath(str(cfile)))
     try:
         relhome = relslash.relative_to(os.getenv('HOME'))
@@ -613,6 +659,7 @@ def unexpanduser(cfile):
         relhome = None
 
     return ('~/' + str(relhome)) if relhome else str(relslash)
+
 
 # Search for configuration file. Use file given as command line
 # argument, else look for file in search dir order.
@@ -637,8 +684,10 @@ def read_conf(conffile, defname):
     get_conf(confpath, confname)
     return confname
 
+
 def lockcheck():
-    'Listen on DBus to set session_locked state'
+    """Listen on DBus to set session_locked state"""
+
     def proc(busname, vals, _):
         global session_locked
         if busname == 'org.freedesktop.login1.Session':
@@ -656,11 +705,13 @@ def lockcheck():
 
     GLib.MainLoop().run()
 
+
 def gethash():
-    'Return a crude hash identifier for this software version'
+    """Return a crude hash identifier for this software version"""
     progs = (PROGPATH, PROGPATH.with_name(PROGNAME + '-setup'))
     return hashlib.md5(b''.join(p.read_bytes() for p in progs if
-        p.exists())).hexdigest()
+                                p.exists())).hexdigest()
+
 
 def main():
     global args, abzsquare
@@ -668,18 +719,18 @@ def main():
     # Set up command line arguments
     opt = argparse.ArgumentParser(description=__doc__)
     opt.add_argument('-c', '--conffile',
-            help='alternative configuration file')
+                     help='alternative configuration file')
     opt.add_argument('-v', '--verbose', action='store_true',
-            help='output diagnostic messages')
+                     help='output diagnostic messages')
     opt.add_argument('-d', '--debug', action='store_true',
-            help='output diagnostic messages only, do not action gestures')
+                     help='output diagnostic messages only, do not action gestures')
     opt.add_argument('-r', '--raw', action='store_true',
-            help='output raw libinput debug-event messages only, '
-            'do not action gestures')
+                     help='output raw libinput debug-event messages only, '
+                          'do not action gestures')
     opt.add_argument('-l', '--list', action='store_true',
-            help='just list out environment and configuration')
+                     help='just list out environment and configuration')
     opt.add_argument('--device',
-            help='explicit device name to use (or path if starts with /)')
+                     help='explicit device name to use (or path if starts with /)')
     # Test/diag hidden option to specify a file containing libinput list
     # device output to parse
     opt.add_argument('--device-list', help=argparse.SUPPRESS)
@@ -703,7 +754,7 @@ def main():
     if args.verbose:
         # Output various info/version info
         xsession = os.getenv('XDG_SESSION_DESKTOP') or \
-                os.getenv('DESKTOP_SESSION') or 'unknown'
+                   os.getenv('DESKTOP_SESSION') or 'unknown'
         xtype = os.getenv('XDG_SESSION_TYPE') or 'unknown'
         print('{}: session {}+{} on {}, python {}, libinput {}'.format(
             PROGNAME, xsession, xtype, platform.platform(),
@@ -722,9 +773,9 @@ def main():
             for h in handlers.values():
                 for mpair, cmd in h.motions.items():
                     motion, fingers = (mpair, '') \
-                            if isinstance(mpair, str) else mpair
+                        if isinstance(mpair, str) else mpair
                     print('{} {:10}{:>2} {}'.format(h.name.lower(), motion,
-                        fingers, cmd))
+                                                    fingers, cmd))
 
             if swipe_min_threshold:
                 print('swipe_threshold {}'.format(swipe_min_threshold))
@@ -763,7 +814,7 @@ def main():
             PROGNAME, user))
 
     # Set up square of swipe threshold
-    abzsquare = swipe_min_threshold**2
+    abzsquare = swipe_min_threshold ** 2
 
     # Note your must "sudo gpasswd -a $USER input" then reboot for
     # permission to access the device.
@@ -776,7 +827,7 @@ def main():
         t.start()
 
     cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
-            bufsize=1, universal_newlines=True)
+                           bufsize=1, universal_newlines=True)
 
     # Store PIDs for potential kill
     pidfile.write('{}\n{}\n'.format(os.getpid(), cmd.pid))
@@ -816,7 +867,7 @@ def main():
                 # Split parameters into list of clean numbers
                 if not handler.update(re.split(r'[^-.\d]+', params)):
                     print('Could not parse {} {}: {}'.format(gesture, event,
-                        params), file=sys.stderr)
+                                                             params), file=sys.stderr)
 
         elif event == 'BEGIN':
             handler = handlers.get(gesture)
@@ -824,7 +875,7 @@ def main():
                 handler.begin(fingers)
             else:
                 print('Unknown gesture received: {}.'.format(gesture),
-                        file=sys.stderr)
+                      file=sys.stderr)
         elif event == 'END':
             # Ignore gesture if final action is cancelled
             if handler:
@@ -833,7 +884,8 @@ def main():
                 handler = None
         else:
             print('Unknown gesture + event received: {} + {}.'.format(gesture,
-                event), file=sys.stderr)
+                                                                      event), file=sys.stderr)
+
 
 if __name__ == '__main__':
     main()
