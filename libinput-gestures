@@ -501,7 +501,7 @@ class PINCH(GESTURE):
     # spaces updates
     counter = 0
     # Skips 15 updates before executing the preferred command
-    skip = 12
+    skip = 13
 
     def update(self, coords):
         """Update this gesture for a motion"""
