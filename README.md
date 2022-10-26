@@ -56,7 +56,7 @@ them. If you are unsure initially, install both of them.
     sudo apt-get install bamfdaemon libbamf3-dev wmctrl xdotool
 
     # E.g. On Fedora:
-    sudo dnf install bamfdaemon libbamf3-dev  wmctrl xdotool
+    sudo dnf install bamfdaemon libbamf3-dev wmctrl xdotool
 
 NOTE: Arch users can now just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.
