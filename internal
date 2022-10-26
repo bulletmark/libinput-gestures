@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+'Command line program to exercise/test/debug the _internal command.'
+# Mark Blakeney, Oct 2019
+import sys, importlib, argparse
+from pathlib import Path
+
+CMD = '_internal'
+GESTURE = 'swipe'
+PROG = Path(sys.argv[0]).resolve()
+NAME = Path.cwd().name
+CACHE = Path.home() / '.cache' / PROG.name
+
+def import_path(path, add_to_path=False):
+    'Import given module path'
+    modname = Path(path).stem.replace('-', '_')
+    spec = importlib.util.spec_from_loader(modname,
+            importlib.machinery.SourceFileLoader(modname, path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if add_to_path:
+        sys.modules[modname] = module
+    return module
+
+opt = argparse.ArgumentParser(description=__doc__)
+opt.add_argument('-c', '--conffile',
+        help='alternative configuration file')
+opt.add_argument('-i', '--initial', type=int,
+        help='initial desktop')
+opt.add_argument('-C', '--cols', type=int, default=1,
+        help='number of columns')
+opt.add_argument('-t', '--text', action='store_true',
+        help='output desktop change in text')
+opt.add_argument('-n', '--nocache', action='store_true',
+        help='do not use cache')
+opt.add_argument('num', type=int,
+        help='number of desktops')
+opt.add_argument('action', nargs='?',
+        help='action to perform')
+opt.add_argument('-d', '--display', type=int,
+        help=argparse.SUPPRESS)
+opt.add_argument('-s', '--set', type=int, help=argparse.SUPPRESS)
+args = opt.parse_args()
+
+def showgrid(pos, num, cols):
+    print()
+    for i in range(num):
+        end = '\n' if (i % cols) == (cols - 1) else ''
+        if i == pos:
+            print(f' {i:02} ', end=end)
+        else:
+            print(' ** ', end=end)
+    if end != '\n':
+        print()
+
+if args.set is not None:
+    print(args.set)
+    sys.exit(0)
+
+if args.display is not None:
+    for i in range(args.num):
+        ds = '*' if i == args.display else '-'
+        print(f'{i} {ds} -')
+    sys.exit(0)
+
+if args.initial is None:
+    if args.nocache:
+        opt.error('Initial value must be specified')
+    if not CACHE.exists():
+        opt.error('Need initial desktop specified')
+    start = int(CACHE.read_text().strip())
+else:
+    start = args.initial
+
+lg = import_path(NAME)
+icmd = lg.internal_commands[CMD]
+
+icmd.CMDLIST = f'{PROG} -d {start} {args.num}'.split()
+icmd.CMDSET = f'{PROG} {args.num} -s'.split()
+
+lg.read_conf(args.conffile, NAME + '.conf')
+motions = lg.handlers[GESTURE.upper()].motions
+actions = {k: v for k, v in motions.items() if isinstance(v, icmd)}
+
+if not args.action or args.action not in actions:
+    opt.error(f'action must be one of {list(actions.keys())}')
+
+cmd = motions[args.action]
+print(f'Command "{GESTURE} {args.action} is "{cmd}"')
+res = cmd.run(block=True)
+
+if res:
+    end = int(res.strip())
+    if not args.nocache:
+        CACHE.write_text(str(end))
+else:
+    end = start
+
+if end < 0 or end >= args.num:
+    sys.exit(f'Desktop change from {start} to {end}, '
+            f'out of range 0 to <{args.num}!')
+
+if args.text:
+    if start != end:
+        print(f'Desktop change from {start} to {end}')
+    else:
+        print('No change')
+else:
+    showgrid(start, args.num, args.cols)
+    showgrid(end, args.num, args.cols)

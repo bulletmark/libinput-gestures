@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+'Command line utility to run test suite for internal command.'
+# Mark Blakeney, Oct 2019
+import sys, tempfile, subprocess, argparse
+
+# flake8: noqa: E122
+TESTS = (
+#####
+(
+'1 column, up/down, no wrap',
+'''
+gesture swipe up		_internal ws_up
+gesture swipe down		_internal ws_down
+''', (
+    '3 desktops',
+    ('up',   1, 3),
+    ('up',   2),
+    ('up',   2),
+    ('down', 1),
+    ('down', 0),
+    ('down', 0),
+),
+),
+#####
+(
+'1 column, up/down, with wrap',
+'''
+gesture swipe up		_internal -w ws_up
+gesture swipe down		_internal -w ws_down
+''', (
+    '3 desktops',
+    ('up',   1, 3),
+    ('up',   2),
+    ('up',   0),
+    ('up',   1),
+    ('up',   2),
+    ('up',   0),
+    ('down', 2),
+    ('down', 1),
+    ('down', 0),
+    ('down', 2),
+),
+),
+#####
+(
+'1 row, left/right, no wrap',
+'''
+gesture swipe left		_internal ws_left
+gesture swipe right		_internal ws_right
+''', (
+    '3 desktops',
+    ('left',  1, 3),
+    ('left',  2),
+    ('left',  2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 0),
+),
+),
+#####
+(
+'1 row, left/right, no wrap, configured as columns',
+'''
+gesture swipe left		_internal -c 3 ws_left
+gesture swipe right		_internal -c 3 ws_right
+''', (
+    '3 desktops',
+    ('left',  1, 3),
+    ('left',  2),
+    ('left',  2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 0),
+),
+),
+#####
+(
+'1 row, left/right, with wrap',
+'''
+gesture swipe left		_internal -w ws_left
+gesture swipe right		_internal -w ws_right
+''', (
+    '3 desktops',
+    ('left',  1, 3),
+    ('left',  2),
+    ('left',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  0),
+    ('right', 2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 2),
+),
+),
+#####
+(
+'1 row, left/right, with wrap, configured as columns',
+'''
+gesture swipe left		_internal -w -c 3 ws_left
+gesture swipe right		_internal -w -c 3 ws_right
+''', (
+    '3 desktops',
+    ('left',  1, 3),
+    ('left',  2),
+    ('left',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  0),
+    ('right', 2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 2),
+),
+),
+#####
+(
+'4 column, up/down/left/right, no wrap',
+'''
+gesture swipe up		_internal -c 4 ws_up
+gesture swipe down		_internal -c 4 ws_down
+gesture swipe left		_internal -c 4 ws_left
+gesture swipe right		_internal -c 4 ws_right
+''', (
+    '12 desktops',
+    ('up',    4, 12),
+    ('up',    8),
+    ('up',    8),
+    ('down',  4),
+    ('down',  0),
+    ('down',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  3),
+    ('left',  3),
+    ('right', 2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 0),
+    ('left',  1),
+    ('up',    5),
+    ('up',    9),
+    ('up',    9),
+    ('left',  10),
+    ('up',    10),
+    ('down',  6),
+    ('down',  2),
+    ('down',  2),
+    ('left',  3),
+    ('up',    7),
+    ('up',    11),
+    ('up',    11),
+    '10 desktops',
+    ('up',    4, 10),
+    ('up',    8),
+    ('up',    8),
+    ('left',  9),
+    ('left',  9),
+    ('down',  5),
+    ('left',  6),
+    ('up',    6),
+    ('left',  7),
+    ('left',  7),
+    ('up',    7),
+    ('down',  3),
+    ('down',  3),
+),
+),
+#####
+(
+'4 column, up/down/left/right, no wrap, legacy config',
+'''
+gesture swipe up		_internal --col=3 ws_up
+gesture swipe down		_internal --col=3 ws_down
+gesture swipe left		_internal --row=4 ws_up
+gesture swipe right		_internal --row=4 ws_down
+''', (
+    '12 desktops',
+    ('up',    4, 12),
+    ('up',    8),
+    ('up',    8),
+    ('down',  4),
+    ('down',  0),
+    ('down',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  3),
+    ('left',  3),
+    ('right', 2),
+    ('right', 1),
+    ('right', 0),
+    ('right', 0),
+    ('left',  1),
+    ('up',    5),
+    ('up',    9),
+    ('up',    9),
+    ('left',  10),
+    ('up',    10),
+    ('down',  6),
+    ('down',  2),
+    ('down',  2),
+    ('left',  3),
+    ('up',    7),
+    ('up',    11),
+    ('up',    11),
+),
+),
+#####
+(
+'4 column, up/down/left/right, with wrap',
+'''
+gesture swipe up		_internal -w -c 4 ws_up
+gesture swipe down		_internal -w -c 4 ws_down
+gesture swipe left		_internal -w -c 4 ws_left
+gesture swipe right		_internal -w -c 4 ws_right
+''', (
+    '12 desktops',
+    ('up',    4, 12),
+    ('up',    8),
+    ('up',    0),
+    ('down',  8),
+    ('down',  4),
+    ('down',  0),
+    ('down',  8),
+    ('up'  ,  0),
+    ('right', 3),
+    ('left',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  3),
+    ('left',  0),
+    ('right', 3),
+    ('up',    7),
+    ('up',    11),
+    ('up',    3),
+    '10 desktops',
+    ('up',    4, 10),
+    ('up',    8),
+    ('up',    0),
+    ('down',  8),
+    ('left',  9),
+    ('left',  8),
+    ('left',  9),
+    ('up',    1),
+    ('up',    5),
+    ('up',    9),
+    ('down',  5),
+    ('left',  6),
+    ('left',  7),
+    ('left',  4),
+    ('right', 7),
+    ('right', 6),
+    ('up',    2),
+    ('down', 6),
+),
+),
+#####
+(
+'4 column, up/down/left/right, with wrap, legacy config',
+'''
+gesture swipe up		_internal -w --col=3 ws_up
+gesture swipe down		_internal -w --col=3 ws_down
+gesture swipe left		_internal -w --row=4 ws_up
+gesture swipe right		_internal -w --row=4 ws_down
+''', (
+    '12 desktops',
+    ('up',    4, 12),
+    ('up',    8),
+    ('up',    0),
+    ('down',  8),
+    ('down',  4),
+    ('down',  0),
+    ('down',  8),
+    ('up'  ,  0),
+    ('right', 3),
+    ('left',  0),
+    ('left',  1),
+    ('left',  2),
+    ('left',  3),
+    ('left',  0),
+    ('right', 3),
+    ('up',    7),
+    ('up',    11),
+    ('up',    3),
+    ('down',  11),
+),
+),
+#####
+(
+'4 column, up/down/left/right & diagonal, no wrap',
+'''
+gesture swipe up		_internal -c 4 ws_up
+gesture swipe down		_internal -c 4 ws_down
+gesture swipe left		_internal -c 4 ws_left
+gesture swipe right		_internal -c 4 ws_right
+gesture swipe left_up		_internal -c 4 ws_left_up
+gesture swipe left_down		_internal -c 4 ws_left_down
+gesture swipe right_up		_internal -c 4 ws_right_up
+gesture swipe right_down	_internal -c 4 ws_right_down
+''', (
+    '12 desktops',
+    ('left_up',    5, 12),
+    ('left_up',    10),
+    ('right_down', 5),
+    ('right_down', 0),
+    ('left',       1),
+    ('left_up',    6),
+    ('left_up',    11),
+    ('down',       7),
+    ('right_down', 2),
+    ('left',       3),
+    ('left',       3),
+    ('right_up',   6),
+    ('right_up',   9),
+    ('right_up',   9),
+    '10 desktops',
+    ('left_up',    5, 10),
+    ('left_up',    5),
+    ('right_down', 0),
+    ('left',       1),
+    ('left_up',    6),
+    ('left_up',    6),
+    ('left_down',  3),
+    ('up',         7),
+    ('right_up',   7),
+    ('right_down', 2),
+    ('right_up',   5),
+    ('right_up',   8),
+    ('right_up',   8),
+    '16 desktops',
+    ('left_up',    5, 16),
+    ('left_up',    10),
+    ('left_up',    15),
+    ('left_up',    15),
+    ('right_down', 10),
+    ('right_down', 5),
+    ('right_down', 0),
+    ('right_down', 0),
+    ('up',         4),
+    ('up',         8),
+    ('up',         12),
+    ('right_down', 12),
+    ('left_down',  9),
+    ('left_down',  6),
+    ('left_down',  3),
+    ('left_down',  3),
+    ('right_up',   6),
+    ('right_up',   9),
+    ('right_up',   12),
+),
+),
+#####
+(
+'4 column, up/down/left/right & diagonal, with wrap',
+'''
+gesture swipe up		_internal -w -c 4 ws_up
+gesture swipe down		_internal -w -c 4 ws_down
+gesture swipe left		_internal -w -c 4 ws_left
+gesture swipe right		_internal -w -c 4 ws_right
+gesture swipe left_up		_internal -w -c 4 ws_left_up
+gesture swipe left_down		_internal -w -c 4 ws_left_down
+gesture swipe right_up		_internal -w -c 4 ws_right_up
+gesture swipe right_down	_internal -w -c 4 ws_right_down
+''', (
+    '12 desktops',
+    ('left_up',    5, 12),
+    ('left_up',    10),
+    ('left_up',    3),
+    ('left_up',    4),
+    ('left_up',    9),
+    ('left_up',    2),
+    ('left_up',    7),
+    ('down',       3),
+    ('right_up',   6),
+    ('right_up',   9),
+    ('right_up',   0),
+    '10 desktops',
+    ('left_up',    5, 10),
+    ('left_up',    2),
+    ('left',       3),
+    ('right_up',   6),
+    ('right_up',   9),
+    ('right_up',   0),
+    '16 desktops',
+    ('left_up',    5, 16),
+    ('left_up',    10),
+    ('left_up',    15),
+    ('left_up',    0),
+    ('right_down', 15),
+    ('right_down', 10),
+    ('right_down', 5),
+    ('right_down', 0),
+    ('right_down', 15),
+    ('left_up',    0),
+    ('up',         4),
+    ('up',         8),
+    ('up',         12),
+    ('right_up',   3),
+    ('right_up',   6),
+    ('right_up',   9),
+    ('right_up',   12),
+),
+),
+)
+
+PROG = 'internal'
+
+opt = argparse.ArgumentParser(description=__doc__)
+opt.add_argument('-q', '--quiet', action='store_true',
+        help='quiet output')
+opt.add_argument('-l', '--list', action='store_true',
+        help='list test sets')
+opt.add_argument('testset', nargs='*', type=int,
+        help=f'test sets to execute, default all {len(TESTS)}')
+args = opt.parse_args()
+
+lastnum = 0
+lastpos = 0
+
+def test(fname, action, end, num=-1, start=-1):
+    global lastnum, lastpos
+    if num < 0:
+        num = lastnum
+    else:
+        lastpos = 0
+
+    if start < 0:
+        start = lastpos
+
+    lastnum = num
+    lastpos = end
+
+    cmd = f'./{PROG} -n -t -c {fname} -i {start} {num} {action}'
+    res = subprocess.run(cmd.split(), universal_newlines=True,
+            stdout=subprocess.PIPE)
+    if res.returncode != 0:
+        return 'Command failed'
+    out = res.stdout.strip().splitlines()[-1].split()[-1]
+    res_end = int(out) if out.isdigit() else start
+    return f'should be {res_end}' if res_end != end else None
+
+tmpfile = tempfile.NamedTemporaryFile('r+t')
+sets = 0
+total = 0
+bad = 0
+
+for testset, (title, confstr, tests) in enumerate(TESTS, 1):
+    if args.testset and testset not in args.testset:
+        continue
+    sets += 1
+    confstr = confstr.strip()
+    tmpfile.seek(0)
+    tmpfile.write(confstr + '\n')
+    tmpfile.truncate()
+    tmpfile.flush()
+    lastpos = 0
+    lastnum = 0
+    print(f'======= Set {testset}: {title}:\n{confstr}')
+    for fargs in tests:
+        if isinstance(fargs, str):
+            print(f' ###### Subset {fargs}:')
+            continue
+        total += 1
+
+        if args.list:
+            continue
+
+        res = test(tmpfile.name, *fargs)
+        if res:
+            print(f' FAILED: {fargs}: {res}')
+            bad += 1
+        elif not args.quiet:
+            print(f' ok    : {fargs}')
+
+print(f'\nTotal sets = {sets}, tests = {total}, failed = {bad}')
+sys.exit(0 if bad == 0 else 1)

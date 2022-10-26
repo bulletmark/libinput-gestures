@@ -1,21 +1,45 @@
 #!/usr/bin/env python3
 'Read gestures from libinput touchpad and action shell commands.'
-# Mark Blakeney, Sep 2015
-import os, sys, argparse, subprocess, shlex, re, getpass, fcntl, platform, math, gi
+# Mark Blakeney, Sep 2015.
+import os
+import sys
+import argparse
+import subprocess
+import shlex
+import re
+import getpass
+import fcntl
+import platform
+import math
+import gi
+import hashlib
+import threading
+from time import monotonic
 from collections import OrderedDict
 from pathlib import Path
-from distutils.version import LooseVersion as Version
-gi.require_version('Wnck', '3.0')
-gi.require_version('Gtk', '3.0')
-gi.require_version('Bamf', '3')
-from gi.repository import Bamf, Gio
+
+dbus_imported = True
+try:
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+    gi.require_version('Wnck', '3.0')
+    gi.require_version('Gtk', '3.0')
+    gi.require_version('Bamf', '3')
+    from gi.repository import Bamf, Gio
+
+except ImportError:
+    dbus_imported = False
+
+session_locked = False
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
+HOME = Path('~').expanduser()
 
 # Conf file containing gesture commands.
 # Search first for user file then system file.
-CONFNAME = '{}.conf'.format(PROGNAME)
+CONFNAME = f'{PROGNAME}.conf'
 USERDIR = os.getenv('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
 CONFDIRS = (USERDIR, '/etc')
 
@@ -27,80 +51,58 @@ OBLIQUE_RATIO = math.tan(math.radians(22.5))
 # Can be changed using configuration command.
 swipe_min_threshold = 0
 
+args = None
+abzsquare = None
+
+# Timeout on gesture action from start to end. 0 = no timeout. In secs.
+# Can be changed using configuration command.
+DEFAULT_TIMEOUT = 1.5
+timeoutv = DEFAULT_TIMEOUT
+
 # Rotation threshold in degrees to discriminate pinch rotate from in/out
 ROTATE_ANGLE = 15.0
 
 # Appname for grouping actions in .conf via [CATCHALL_APPNAME]
 CATCHALL_APPNAME='general'
 
-# Set up command line arguments
-opt = argparse.ArgumentParser(description=__doc__)
-opt.add_argument('-c', '--conffile',
-        help='alternative configuration file')
-opt.add_argument('-v', '--verbose', action='store_true',
-        help='output diagnostic messages')
-opt.add_argument('-d', '--debug', action='store_true',
-        help='output diagnostic messages only, do not action gestures')
-opt.add_argument('-r', '--raw', action='store_true',
-        help='output raw libinput debug-event messages only, '
-        'do not action gestures')
-opt.add_argument('-l', '--list', action='store_true',
-        help='just list out environment and configuration')
-opt.add_argument('--device',
-        help='explicit device name to use (or path if starts with /)')
-# Test/diag hidden option to specify a file containing libinput list
-# device output to parse
-opt.add_argument('--device-list', help=argparse.SUPPRESS)
-args = opt.parse_args()
-
-if args.debug or args.raw or args.list:
-    args.verbose = True
-
 def open_lock(*args):
-    'Create a lock based on given list of arguments'
+    'Create lock/pid files based on given list of arguments'
     # We use exclusive assess to a file for this
-    fp = Path('/tmp', '-'.join(args) + '.lock').open('w')
+    fname = Path('/tmp', '-'.join(args))
+    flock = fname.with_suffix('.lock').open('w')
     try:
-        fcntl.lockf(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.lockf(flock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError:
-        return None
+        return None, None
 
-    return fp
+    fpid = fname.with_suffix('.pid').open('w')
+    return flock, fpid
 
-def run(cmd, check=True):
-    'Run subprocess function and return standard output or None'
-    # Maintain subprocess compatibility with python 3.4 so use
-    # check_output() rather than run().
+def run(cmd, *, check=True, block=True):
+    'Run function and return standard output, Popen() handle, or None'
     try:
-        stdout = subprocess.check_output(cmd, universal_newlines=True,
-                stderr=(None if check else subprocess.DEVNULL))
+        if block:
+            result = subprocess.check_output(cmd, universal_newlines=True,
+                    stderr=(None if check else subprocess.DEVNULL))
+        else:
+            result = bool(subprocess.Popen(cmd))
     except Exception as e:
-        stdout = None
+        result = None
         if check:
             print(str(e), file=sys.stderr)
 
-    return stdout
+    return result
 
 def get_libinput_vers():
     'Return the libinput installed version number string'
     # Try to use newer libinput interface then fall back to old
     # (depreciated) interface.
     res = run(('libinput', '--version'), check=False)
-    return res.strip() if res else \
-            run(('libinput-list-devices', '--version'), check=False)
+    if res:
+        return res.strip(), True
 
-# Libinput changed the way in which it's utilities are called
-libvers = get_libinput_vers()
-if not libvers:
-    sys.exit('libinput helper tools do not seem to be installed?')
-
-if Version(libvers) >= Version('1.8'):
-    cmd_debug_events = 'libinput debug-events'
-    cmd_list_devices = 'libinput list-devices'
-else:
-    cmd_debug_events = 'libinput-debug-events'
-    cmd_list_devices = 'libinput-list-devices'
-
+    res = run(('libinput-list-devices', '--version'), check=False)
+    return res and res.strip(), False
 
 
 
@@ -122,10 +124,10 @@ def get_active_window_title():
 
     return None
 
-def get_devices_list():
+def get_devices_list(cmd_list_devices, device_list):
     'Get list of devices and their attributes (as a dict) from libinput'
-    if args.device_list:
-        with open(args.device_list) as fd:
+    if device_list:
+        with open(device_list) as fd:
             stdout = fd.read()
     else:
         stdout = run(cmd_list_devices.split())
@@ -141,13 +143,17 @@ def get_devices_list():
                 yield dev
                 dev = {}
 
-def get_device(name):
-    'Determine libinput touchpad device'
-    devices = list(get_devices_list())
+        # Ensure we include last device
+        if dev:
+            yield dev
+
+def get_device_info(name, cmd_list_devices, device_list):
+    'Determine libinput touchpad device and return device info'
+    devices = list(get_devices_list(cmd_list_devices, device_list))
 
     if not devices:
         print('Can not see any devices, did you add yourself to the '
-                'input group and log out/in?', file=sys.stderr)
+                'input group and reboot?', file=sys.stderr)
         return None
 
     # If a specific device name was asked for then return that device
@@ -158,8 +164,8 @@ def get_device(name):
             # If the device name starts with a '/' then it is instead
             # considered as the explicit device path although since
             # device paths can change through reboots this is best to be
-            # a symlink. E.g. use the corresponding full path link under
-            # /dev/input/by-path/*.
+            # a symlink. E.g. users should use the corresponding full
+            # path link under /dev/input/by-path/ or /dev/input/by-id/.
             if kdev:
                 if d.get('kernel') == kdev:
                     return d
@@ -171,14 +177,41 @@ def get_device(name):
     for d in devices:
         if 'size' in d and 'pointer' in d.get('capabilities'):
             return d
-
     # Otherwise look for 1st device with touchpad in it's name
-    for d in devices:
-        if re.search(r'touch ?pad', d.get('device', ''), re.I):
-            return d
+    # or, failing that, 1st device with trackpad in it's name
+    for txt in ('touch ?pad', 'track ?pad'):
+        for d in devices:
+            if re.search(txt, d.get('device', ''), re.I):
+                return d
 
     # Give up
     return None
+
+def get_device(name, cmd_list_devices, device_list):
+    'Determine libinput touchpad device and add fixed path info'
+    dev = get_device_info(name, cmd_list_devices, device_list)
+    if dev:
+        devname = dev.get('kernel')
+        evname = ''
+        if devname:
+            devpath = Path(devname)
+
+            # Also determine and prefer a non-volatile path merely
+            # because it is more identifying for users.
+            for dirstr in ('/dev/input/by-path', '/dev/input/by-id'):
+                dirpath = Path(dirstr)
+                if dirpath.exists():
+                    for path in dirpath.iterdir():
+                        if path.resolve() == devpath:
+                            devname = str(path)
+                            evname = f'({devpath.name})'
+                            break
+                    if evname:
+                        break
+
+        dev['_path'] = devname
+        dev['_diag'] = f"{devname}{evname}: {dev.get('device', '?')}"
+    return dev
 
 class COMMAND:
     'Generic command handler'
@@ -191,7 +224,7 @@ class COMMAND:
 
     def run(self):
         'Run this command + arguments'
-        run(self.argslist)
+        run(self.argslist, block=False)
 
     def __str__(self):
         'Return string representation'
@@ -204,69 +237,154 @@ def add_internal_command(cls):
     'Add configuration command to command lookup table based on name'
     internal_commands[re.sub('^COMMAND', '', cls.__name__)] = cls
 
+class ArgumentParser(argparse.ArgumentParser):
+    'Custom ArgumentParser to return error text'
+    def error(self, msg):
+        raise Exception(msg)
+
 @add_internal_command
 class COMMAND_internal(COMMAND):
     'Internal command handler.'
+    # Commands currently supported follow. Each is configured with the
+    # (X,Y) translation to be applied to the desktop grid.
+    commands = (
+        ('ws_up',         ( 0,  1)),  # noqa: E241,E201
+        ('ws_down',       ( 0, -1)),  # noqa: E241,E201
+        ('ws_left',       ( 1,  0)),  # noqa: E241,E201
+        ('ws_right',      (-1,  0)),  # noqa: E241,E201
+        ('ws_left_up',    ( 1,  1)),  # noqa: E241,E201
+        ('ws_left_down',  ( 1, -1)),  # noqa: E241,E201
+        ('ws_right_up',   (-1,  1)),  # noqa: E241,E201
+        ('ws_right_down', (-1, -1)),  # noqa: E241,E201
+    )
+
+    commands_list = [c[0] for c in commands]
+
+    CMDTEST = 'wmctrl -m'.split()
+    CMDLIST = 'wmctrl -d'.split()
+    CMDSET = 'wmctrl -s'.split()
+
     def __init__(self, args):
         'Action internal swipe commands'
         super().__init__(args)
 
-        # Commands currently supported are:
-        commands = (
-            'ws_up',
-            'ws_down',
-        )
         # Set up command line arguments
-        opt = argparse.ArgumentParser(prog=self.argslist[0],
-                description=self.__doc__)
+        opt = ArgumentParser(prog=self.argslist[0], description=self.__doc__)
         opt.add_argument('-w', '--wrap', action='store_true',
-                help='Wrap workspaces when switching to/from start/end')
-        opt.add_argument('--row', type=int,
-                help='Step along the row for this number in a row')
-        opt.add_argument('--col', type=int,
-                help='Step along the column for this number in a column')
-        opt.add_argument('action', choices=commands,
+                help='wrap workspaces when switching to/from start/end')
+        opt.add_argument('-c', '--cols', type=int,
+                help='number of columns in virtual desktop grid, default=1')
+        opt.add_argument('--row', type=int, default=0, help=argparse.SUPPRESS)
+        opt.add_argument('--col', type=int, default=0, help=argparse.SUPPRESS)
+        opt.add_argument('action', choices=self.commands_list,
                 help='Internal command to action')
-        self.args = opt.parse_args(self.argslist[1:])
-        self.is_up = self.args.action == commands[0]
+        args = opt.parse_args(self.argslist[1:])
+        self.nowrap = not args.wrap
+        self.rows = 0
+        self.cols = 0
+        cmdi = self.commands_list.index(args.action)
 
-    def run(self):
+        if self.CMDTEST[0] and not run(self.CMDTEST, check=False):
+            print(f'Warning: must install {self.CMDTEST[0]} '
+                    'to use _internal command.', file=sys.stderr)
+
+        # Only do above check once
+        self.CMDTEST[0] = ''
+
+        if cmdi >= 2:
+            if args.row or args.col:
+                opt.error('Legacy "--row" and "--col" not supported')
+            if args.cols is None:
+                if cmdi < 4:
+                    self.cols = 1
+                    cmdi -= 2
+                else:
+                    opt.error('"--cols" must be specified')
+            elif args.cols < 1:
+                opt.error('"--cols" must be >= 1')
+            else:
+                self.cols = args.cols
+        else:
+            # Convert old legacy/depreciated arguments to new arguments
+            if args.cols is not None:
+                if args.cols < 1:
+                    opt.error('"--cols" must be >= 1')
+                self.cols = args.cols
+            elif args.row:
+                cmdi += 2
+                self.cols = args.row
+            elif args.col:
+                self.rows = args.col
+            else:
+                self.cols = 1
+
+        # Save the translations appropriate to this command
+        self.xmove, self.ymove = self.commands[cmdi][1]
+
+    def run(self, block=False):
         'Get list of current workspaces and select next one'
-        stdout = run(('wmctrl', '-d'), check=False)
+        stdout = run(self.CMDLIST, check=False)
         if not stdout:
             # This command can fail on GNOME when you have only a single
-            # dynamic workspace using Xorg (probably a GNOME bug) so let's
-            # just ignore it given there is no other workspace to switch to
-            # anyhow.
-            return
+            # dynamic workspace (probably a GNOME bug) so let's just
+            # fudge that default case.
+            stdout = '0 *\n1 -'
 
-        args = self.args
-        out = stdout.strip().splitlines()
-        lines = [l.split(maxsplit=3)[1] for l in out]
-        index = lines.index('*')
+        # Parse the output of above command
+        lines = [ln.split(maxsplit=2)[1] for ln in stdout.strip().splitlines()]
+        start = index = lines.index('*')
+        num = len(lines)
+        cols = self.cols or num // self.rows
+        numv = ((num - 1) // cols + 1) * cols
 
-        if args.row:
-            minindex = index - (index % args.row)
-            maxindex = minindex + args.row
-            count = 1
-        else:
-            minindex = 0
-            maxindex = len(lines)
-            count = (maxindex // args.col) if args.col else 1
+        # Calculate new workspace X direction index
+        count = self.xmove
+        if count < 0:
+            if index % cols == 0:
+                if self.nowrap:
+                    return
+                index += cols - 1
+                if index >= num:
+                    if self.ymove == 0:
+                        if self.nowrap:
+                            return
+                        index = num - 1
+            else:
+                index += count
+        elif count > 0:
+            index += count
+            if index % cols == 0:
+                if self.nowrap:
+                    return
+                index -= cols
+            elif index >= num:
+                if self.ymove == 0:
+                    if self.nowrap:
+                        return
+                    index -= numv - index
 
-        # Work out desired workspace
-        index += count if self.is_up else -count
-        if args.wrap:
-            if index == minindex - count:
-                index = maxindex - count
-            elif index >= maxindex:
-                index += minindex - maxindex
-            elif index < minindex:
-                index += maxindex - minindex
+        # Calculate new workspace Y direction index
+        count = self.ymove * cols
+        if count < 0:
+            if index < cols and self.nowrap:
+                return
+            index = (index + count) % numv
+            if index >= num:
+                index += count
+        elif count > 0:
+            index += count
+            if index >= numv:
+                if self.nowrap:
+                    return
+                index = index % numv
+            elif index >= num:
+                if self.nowrap:
+                    return
+                index = (index + count) % numv
 
         # Switch to desired workspace
-        if index >= minindex and index < maxindex:
-            run(('wmctrl', '-s', str(index)))
+        return run(self.CMDSET + [str(index)], block=block) \
+                if index != start else None
 
 # Table of gesture handlers
 handlers = OrderedDict()
@@ -289,15 +407,15 @@ class GESTURE:
     def add(self, motion, fingers, command, appname):
         'Add a configured motion command for this gesture'
         if motion not in self.SUPPORTED_MOTIONS:
-            return 'Gesture {} does not support motion "{}".\n' \
-                    'Must be "{}"'.format(self.name.lower(), motion,
-                            '" or "'.join(self.SUPPORTED_MOTIONS))
+            opts = '" or "'.join(self.SUPPORTED_MOTIONS)
+            return f'Gesture {self.name.lower()} does not support '\
+                    f'motion "{motion}".\nMust be "{opts}"'
         if not command:
             return 'No command configured'
 
         # If any extended gestures configured then set flag to enable
         # their discrimination
-        if self.extended_text in motion:
+        if self.extended_text and self.extended_text in motion:
             self.has_extended = True
 
         key = (appname, motion, fingers) if fingers else (appname, motion)
@@ -308,13 +426,19 @@ class GESTURE:
             return str(e)
 
         cls = internal_commands.get(cmds[0], COMMAND)
-        self.motions[key] = cls(cmds)
+
+        try:
+            self.motions[key] = cls(cmds)
+        except Exception as e:
+            return str(e)
+
         return None
 
     def begin(self, fingers):
         'Initialise this gesture at the start of motion'
         self.fingers = fingers
         self.data = [0.0, 0.0]
+        self.starttime = monotonic()
 
     def action(self, motion):
 
@@ -345,12 +469,22 @@ class GESTURE:
 
 
         if args.verbose:
-            print('{}: [{}] {} {} {} {}'.format(PROGNAME, appname, self.name, motion,
-                self.fingers, self.data))
+            print(f'{PROGNAME}: [{appname}] {self.name} {motion} '
+                    f'{self.fingers} {self.data}')
             if command:
                 print('  ', command)
             else:
-                print('   no command')
+                print('   ', 'no command')
+
+        if timeoutv > 0 and (self.starttime + timeoutv) < monotonic():
+            if args.verbose:
+                print('  ', 'timeout - no action')
+            return
+
+        if timeoutv > 0 and (self.starttime + timeoutv) < monotonic():
+            if args.verbose:
+                print('  ', 'timeout - no action')
+            return
 
         if command and not args.debug:
             command.run()
@@ -427,6 +561,19 @@ class PINCH(GESTURE):
         elif ratio != 0.0:
             self.action('in' if ratio <= 0.0 else 'out')
 
+@add_gesture_handler
+class HOLD(GESTURE):
+    'Class to handle this type of gesture'
+    SUPPORTED_MOTIONS = ('on',)
+    extended_text = None
+
+    def update(self, coords):
+        return True
+
+    def end(self):
+        'Action this gesture at the end of a motion sequence'
+        self.action('on')
+
 # Table of configuration commands
 conf_commands = OrderedDict()
 
@@ -447,8 +594,8 @@ def conf_gesture(lineargs, appname):
     handler = handlers.get(gesture.upper())
 
     if not handler:
-        return 'Gesture "{}" is not supported.\nMust be "{}"'.format(
-                gesture, '" or "'.join([h.lower() for h in handlers]))
+        opts = '" or "'.join([h.lower() for h in handlers])
+        return f'Gesture "{gesture}" is not supported.\nMust be "{opts}"'
 
     # Gesture command can be configured with optional specific finger
     # count so look for that
@@ -481,6 +628,17 @@ def swipe_threshold(lineargs):
 
     return None if swipe_min_threshold >= 0 else 'Must be >= 0'
 
+@add_conf_command
+def timeout(lineargs):
+    'Change gesture timeout'
+    global timeoutv
+    try:
+        timeoutv = float(lineargs)
+    except Exception:
+        return 'Must be float value'
+
+    return None if timeoutv >= 0 else 'Must be >= 0'
+
 def get_conf_line(line, appname):
     'Process a single line in conf file'
     key, *argslist = line.split(maxsplit=1)
@@ -490,8 +648,9 @@ def get_conf_line(line, appname):
     conf_func = conf_commands.get(key)
 
     if not conf_func:
-        return 'Configuration command "{}" is not supported.\n' \
-                'Must be "{}"'.format(key, '" or "'.join(conf_commands))
+        opts = '" or "'.join(conf_commands)
+        return f'Configuration command "{key}" is not supported.\n' \
+                f'Must be "{opts}"'
 
     return conf_func(argslist[0] if argslist else '', appname)
 
@@ -510,149 +669,243 @@ def get_conf(conffile, confname):
 
             errmsg = get_conf_line(line, appname)
             if errmsg:
-                sys.exit('Error at line {} in file {}:\n>> {} <<\n{}.'.format(
-                    num, confname, line, errmsg))
+                sys.exit(f'Error at line {num} in file {confname}:\n'
+                        f'>> {line} <<\n{errmsg}.')
 
 def unexpanduser(cfile):
     'Return absolute path name, with $HOME replaced by ~'
-    relslash = Path(os.path.abspath(str(cfile)))
-    try:
-        relhome = relslash.relative_to(os.getenv('HOME'))
-    except ValueError:
-        relhome = None
+    cfile_abs = cfile.resolve()
 
-    return ('~/' + str(relhome)) if relhome else str(relslash)
+    if cfile_abs.parts[:len(HOME.parts)] != HOME.parts:
+        return str(cfile_abs)
 
-if args.verbose:
-    # Output various info/version info
-    xsession = os.getenv('XDG_SESSION_DESKTOP') or \
-            os.getenv('DESKTOP_SESSION') or 'unknown'
-    xtype = os.getenv('XDG_SESSION_TYPE') or 'unknown'
-    print('{}: session {}+{} on {}, python {}, libinput {}'.format(
-        PROGNAME, xsession, xtype, platform.platform(),
-        platform.python_version(), libvers))
-
-    # Output hash version/checksum of this program
-    vers = run(('md5sum', str(PROGPATH)), check=False)
-    vers = str(vers.split()[0]) if vers else '?'
-    print('{}: hash {}'.format(PROGPATH, vers))
+    return str(Path('~', *cfile_abs.parts[len(HOME.parts):]))
 
 # Search for configuration file. Use file given as command line
 # argument, else look for file in search dir order.
-if args.conffile:
-    conffile = Path(args.conffile)
-    if not conffile.exists():
-        sys.exit('Conf file "{}" does not exist.'.format(conffile))
-else:
-    for confdir in CONFDIRS:
-        conffile = Path(confdir, CONFNAME)
-        if conffile.exists():
-            break
+def read_conf(conffile, defname):
+    if conffile:
+        confpath = Path(conffile)
+        if not confpath.exists():
+            sys.exit(f'Conf file "{conffile}" does not exist.')
     else:
-        sys.exit('No file {} in {}.'.format(CONFNAME, ' or '.join(
-            [unexpanduser(Path(c)) for c in CONFDIRS])))
-
-# Hide any personal user dir/names from diag output
-confname = unexpanduser(conffile)
-
-# Read and process the conf file
-get_conf(conffile, confname)
-
-# List out available gestures if that is asked for
-if args.verbose and not args.raw:
-    print('Gestures configured in {}:'.format(confname))
-    for h in handlers.values():
-        for mpair, cmd in h.motions.items():
-            if len(mpair) == 2:
-                appname, motion = mpair
-                fingers = ''
-            else:
-                appname, motion, fingers = mpair
-            print('{} {:10}{:>2} {}'.format('['+appname+']', h.name.lower(), motion,
-                fingers, cmd))
-    if args.device:
-        print('device {}'.format(args.device))
-
-# Get touchpad device
-if not args.device or args.device.lower() != "all":
-    device = get_device(args.device)
-    if not device:
-        sys.exit('Could not determine touchpad device.')
-else:
-    device = None
-
-if args.verbose:
-    if device:
-        print('{}: device {}: {}'.format(PROGNAME, device.get('kernel'),
-            device.get('device')))
-    else:
-        print('{}: monitoring all devices'.format(PROGNAME))
-
-# If just called to list out above environment info then exit now
-if args.list:
-    sys.exit()
-
-# Make sure only one instance running for current user
-user = getpass.getuser()
-proglock = open_lock(PROGNAME, user)
-if not proglock:
-    sys.exit('{} is already running for {}, terminating ..'.format(
-        PROGNAME, user))
-
-# Set up square of swipe threshold
-abzsquare = swipe_min_threshold**2
-
-# Note your must "sudo gpasswd -a $USER input" then log out/in for
-# permission to access the device.
-devstr = ' --device {}'.format(device.get('kernel')) if device else ''
-command = 'stdbuf -oL -- {}{}'.format(cmd_debug_events, devstr)
-
-cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
-        bufsize=1, universal_newlines=True)
-
-# Sit in a loop forever reading the libinput messages ..
-handler = None
-for line in cmd.stdout:
-
-    # Just output raw messages if in that mode
-    if args.raw:
-        print(line.strip())
-        continue
-
-    # Only interested in gestures
-    if 'GESTURE_' not in line:
-        continue
-
-    # Split received message line into relevant fields
-    dev, gevent, time, other = line.strip().split(maxsplit=3)
-    gesture, event = gevent[8:].split('_')
-    fingers, *argslist = other.split(maxsplit=1)
-    params = argslist[0] if argslist else ''
-
-    # Action each type of event
-    if event == 'UPDATE':
-        if handler:
-            # Split parameters into list of clean numbers
-            if not handler.update(re.split(r'[^-.\d]+', params)):
-                print('Could not parse {} {}: {}'.format(gesture, event,
-                    params), file=sys.stderr)
-
-    elif event == 'BEGIN':
-
-        handler = handlers.get(gesture)
-        if handler:
-            handler.begin(fingers)
+        for confdir in CONFDIRS:
+            confpath = Path(confdir, defname)
+            if confpath.exists():
+                break
         else:
-            print('Unknown gesture received: {}.'.format(gesture),
-                    file=sys.stderr)
-    elif event == 'END':
-        # Ignore gesture if final action is cancelled
-        if handler:
-            if params != 'cancelled':
-                handler.end()
-            handler = None
+            opts = ' or '.join([unexpanduser(Path(c)) for c in CONFDIRS])
+            sys.exit(f'No file {defname} in {opts}.')
+
+    # Hide any personal user dir/names from diag output
+    confname = unexpanduser(confpath)
+
+    # Read and process the conf file
+    get_conf(confpath, confname)
+    return confname
+
+def lockcheck():
+    'Listen on DBus to set session_locked state'
+    def proc(busname, vals, _):
+        global session_locked
+        if busname == 'org.freedesktop.login1.Session':
+            val = vals.get('LockedHint')
+            if val is not None:
+                session_locked = bool(val)
+
+    DBusGMainLoop(set_as_default=True)
+    dbus.SystemBus().add_signal_receiver(
+        proc,
+        'PropertiesChanged',
+        'org.freedesktop.DBus.Properties',
+        'org.freedesktop.login1',
+    )
+
+    GLib.MainLoop().run()
+
+def gethash():
+    'Return a crude hash identifier for this software version'
+    progs = (PROGPATH, PROGPATH.with_name(PROGNAME + '-setup'))
+    return hashlib.md5(b''.join(p.read_bytes() for p in progs if
+        p.exists())).hexdigest()
+
+def main():
+    global args, abzsquare
+
+    # Set up command line arguments
+    opt = argparse.ArgumentParser(description=__doc__)
+    opt.add_argument('-c', '--conffile',
+            help='alternative configuration file')
+    opt.add_argument('-v', '--verbose', action='store_true',
+            help='output diagnostic messages')
+    opt.add_argument('-d', '--debug', action='store_true',
+            help='output diagnostic messages only, do not action gestures')
+    opt.add_argument('-r', '--raw', action='store_true',
+            help='output raw libinput debug-event messages only, '
+            'do not action gestures')
+    opt.add_argument('-l', '--list', action='store_true',
+            help='just list out environment and configuration')
+    opt.add_argument('--device',
+            help='explicit device name to use (or path if starts with /)')
+    # Test/diag hidden option to specify a file containing libinput list
+    # device output to parse
+    opt.add_argument('--device-list', help=argparse.SUPPRESS)
+    args = opt.parse_args()
+
+    if args.debug or args.raw or args.list:
+        args.verbose = True
+
+    # Libinput changed the way in which it's utilities are called
+    libvers, has_subcmd = get_libinput_vers()
+    if not libvers:
+        sys.exit('libinput helper tools do not seem to be installed?')
+
+    if has_subcmd:
+        cmd_debug_events = 'libinput debug-events'
+        cmd_list_devices = 'libinput list-devices'
     else:
-        print('Unknown gesture + event received: {} + {}.'.format(gesture,
-            event), file=sys.stderr)
+        cmd_debug_events = 'libinput-debug-events'
+        cmd_list_devices = 'libinput-list-devices'
+
+    if args.verbose:
+        # Output various info/version info
+        xsession = os.getenv('XDG_SESSION_DESKTOP') or \
+                os.getenv('DESKTOP_SESSION') or 'unknown'
+        xtype = os.getenv('XDG_SESSION_TYPE') or 'unknown'
+        xstr = f'session {xsession}+{xtype}'
+        pf = platform.platform()
+        pfpy = f'python {platform.python_version()}'
+        lstr = f'libinput {libvers}'
+        print(f'{PROGNAME}: {xstr} on {pf}, {pfpy}, {lstr}')
+
+        # Output hash version/checksum of this program
+        print(f'Hash: {gethash()}')
+
+    # Read and process the conf file
+    confname = read_conf(args.conffile, CONFNAME)
+
+    # List out available gestures if that is asked for
+    if args.verbose:
+        if not args.raw:
+            print(f'Gestures configured in {confname}:')
+            for h in handlers.values():
+                for mpair, cmd in h.motions.items():
+                  if len(mpair) == 2:
+                     appname, motion = mpair
+                     fingers = ''
+                  else:
+                      appname, motion, fingers = mpair
+                  print(f'[{appname}] {h.name.lower()} {motion:10}{fingers:>2} {cmd}')
+
+            if swipe_min_threshold:
+                print(f'swipe_threshold {swipe_min_threshold}')
+            if timeoutv != DEFAULT_TIMEOUT:
+                print(f'timeout {timeoutv}')
+
+        if args.device:
+            print(f'device {args.device}')
+
+    # Get touchpad device
+    if not args.device or args.device.lower() != "all":
+        device = get_device(args.device, cmd_list_devices, args.device_list)
+        if not device:
+            sys.exit('Could not determine touchpad device.')
+    else:
+        device = None
+
+    if args.verbose:
+        if device:
+            print(f"{PROGNAME}: device {device.get('_diag')}")
+        else:
+            print(f'{PROGNAME}: monitoring all devices')
+
+    # If just called to list out above environment info then exit now
+    if args.list:
+        status = run((PROGNAME + '-setup', 'status'), check=False)
+        if status:
+            print(status.strip())
+        sys.exit()
+
+    # Make sure only one instance running for current user
+    user = getpass.getuser()
+    lockfile, pidfile = open_lock(PROGNAME, user)
+    if not lockfile:
+        sys.exit(f'{PROGNAME} is already running for {user}, terminating ..')
+
+    # Set up square of swipe threshold
+    abzsquare = swipe_min_threshold**2
+
+    # Note your must "sudo gpasswd -a $USER input" then reboot for
+    # permission to access the device.
+    devstr = f" --device {device.get('_path')}" if device else ''
+    command = f'stdbuf -oL -- {cmd_debug_events}{devstr}'
+
+    if dbus_imported:
+        t = threading.Thread(target=lockcheck)
+        t.daemon = True
+        t.start()
+
+    cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
+            bufsize=1, universal_newlines=True)
+
+    # Store PIDs for potential kill
+    pidfile.write(f'{os.getpid()}\n{cmd.pid}\n')
+    pidfile.flush()
+    os.fsync(pidfile.fileno())
+
+    # Sit in a loop forever reading the libinput messages ..
+    handler = None
+    for line in cmd.stdout:
+
+        # Ignore gestures if this session is locked
+        if session_locked:
+            continue
+
+        # Just output raw messages if in that mode
+        if args.raw:
+            print(line.strip())
+            continue
+
+        # Only interested in gestures
+        if 'GESTURE_' not in line:
+            continue
+
+        # Split received message line into relevant fields
+        dev, gevent, time, other = line.strip().split(maxsplit=3)
+        try:
+            gesture, event = gevent[8:].split('_')
+        except Exception:
+            continue
+
+        fingers, *argslist = other.split(maxsplit=1)
+        params = argslist[0] if argslist else ''
+
+        # Action each type of event
+        if event == 'UPDATE':
+            if handler:
+                # Split parameters into list of clean numbers
+                if not handler.update(re.split(r'[^-.\d]+', params)):
+                    print('Could not parse {gesture} {event}: {params}',
+                            file=sys.stderr)
+
+        elif event == 'BEGIN':
+            handler = handlers.get(gesture)
+            if handler:
+                handler.begin(fingers)
+            else:
+                print(f'Unknown gesture received: {gesture}.',
+                        file=sys.stderr)
+        elif event == 'END':
+            # Ignore gesture if final action is cancelled
+            if handler:
+                if params != 'cancelled':
+                    handler.end()
+                handler = None
+        else:
+            print(f'Unknown gesture {gesture} + event {event} received.',
+                    file=sys.stderr)
+
+if __name__ == '__main__':
+    main()
 
 

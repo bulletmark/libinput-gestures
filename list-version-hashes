@@ -4,18 +4,22 @@
 PROG="$(basename $0)"
 PROGDIR="$(dirname $0)"
 SUMPROG="md5sum"
+MAINPROG="libinput-gestures"
 
 usage() {
     echo "Usage: $PROG [-options] [hashsum]"
     echo "Development utility to list version and hash sums, and flag those that"
-    echo "match given hash sum. Must be run from the libinput-gestures git repo dir."
-    echo "Options: (none)"
+    echo "match given hash sum. Must be run from the $MAINPROG git repo dir."
+    echo "Options:"
+    echo "-o (use old hash calc)"
     exit 1
 }
 
 # Process command line options
-while getopts \? c; do
+OLDCALC=0
+while getopts o\? c; do
     case $c in
+    o) OLDCALC=1;;
     \?) usage;;
     esac
 done
@@ -49,13 +53,21 @@ cd ${PROGDIR:-.} || exit 1
 tag=""
 while read hashc; do
     tag=$(git describe --tags --always $hashc)
-    hashsum=$(git show $hashc:libinput-gestures | $SUMPROG)
-    output $tag $hashsum
+
+    filelist="$hashc:$MAINPROG"
+    if [[ $OLDCALC -eq 0 ]]; then
+	filelist="$filelist $hashc:$MAINPROG-setup"
+    fi
+
+    output $tag "$(git show $filelist 2>/dev/null | $SUMPROG)"
 done <<< "$(git rev-list --all --reverse)"
 
 # Output a version for the working tree as well
 tagw=$(git describe --tags --always --dirty)
 if [[ $tagw != $tag ]]; then
-    hashsum=$($SUMPROG libinput-gestures)
-    output $tagw $hashsum
+    if [[ $OLDCALC -eq 0 ]]; then
+	output $tagw "$(cat $MAINPROG $MAINPROG-setup | $SUMPROG)"
+    else
+	output $tagw "$($SUMPROG <$MAINPROG)"
+    fi
 fi
