@@ -113,8 +113,13 @@ def get_active_window_title():
     m = re.search(b'^_NET_ACTIVE_WINDOW.* ([\w]+)$', stdout)
     if m != None:
         window_id = m.group(1)
-        window = subprocess.Popen(['xprop', '-id', window_id, 'WM_NAME'], stdout=subprocess.PIPE)
-        stdout, stderr = window.communicate()
+        if window_id != '0x0':
+            if args.verbose:
+                print(f'window id: {window_id} from: {stdout}');
+            window = subprocess.Popen(['xprop', '-id', window_id, 'WM_NAME'], stdout=subprocess.PIPE)
+            stdout, stderr = window.communicate()
+        else:
+            window = 'Desktop'
     else:
         return None
 
@@ -459,7 +464,7 @@ class GESTURE:
                 appname = appname_cache[appl];
 
         if args.debug:
-                print('current active window ',appname)
+                print(f'current active window [{appname}]')
 
         'Action a motion command for this gesture'
         command = self.motions.get((appname, motion, self.fingers)) or \
