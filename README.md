@@ -58,6 +58,10 @@ that package exists in your release:
 
     sudo apt-get install libinput-tools
 
+To use the ability to enable different commands depending of the current focused window you need a running instance of bamfdaemon. So maybe you need to install it:
+
+    sudo apt-get install -y bamfdaemon
+
 Install this software:
 
     git clone https://github.com/bulletmark/libinput-gestures.git

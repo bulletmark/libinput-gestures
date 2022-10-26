@@ -101,6 +101,27 @@ else:
     cmd_debug_events = 'libinput-debug-events'
     cmd_list_devices = 'libinput-list-devices'
 
+
+
+
+def get_active_window_title():
+    root = subprocess.Popen(['xprop', '-root', '_NET_ACTIVE_WINDOW'], stdout=subprocess.PIPE)
+    stdout, stderr = root.communicate()
+
+    m = re.search(b'^_NET_ACTIVE_WINDOW.* ([\w]+)$', stdout)
+    if m != None:
+        window_id = m.group(1)
+        window = subprocess.Popen(['xprop', '-id', window_id, 'WM_NAME'], stdout=subprocess.PIPE)
+        stdout, stderr = window.communicate()
+    else:
+        return None
+
+    match = re.match(b"WM_NAME\(\w+\) = (?P<name>.+)$", stdout)
+    if match != None:
+        return match.group("name").strip(b'"')
+
+    return None
+
 def get_devices_list():
     'Get list of devices and their attributes (as a dict) from libinput'
     if args.device_list:
@@ -298,7 +319,7 @@ class GESTURE:
     def action(self, motion):
 
 	# determine application name of the current active window
-        appname = '';
+        appname = get_active_window_title();
         appl = Bamf.Matcher.get_default().get_active_application()
         if not appl in appname_cache:
                 if appl:
