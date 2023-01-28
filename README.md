@@ -70,7 +70,7 @@ Install this software:
 
     git clone https://github.com/bulletmark/libinput-gestures.git
     cd libinput-gestures
-    sudo make install (or sudo ./libinput-gestures-setup install)
+    sudo make install # Or sudo ./libinput-gestures-setup install
 
 ### CONFIGURATION
 
@@ -216,7 +216,7 @@ You can switch back to the desktop option with the command:
 
     # cd to source dir, as above
     git pull
-    sudo make install (or sudo ./libinput-gestures-setup install)
+    sudo make install # Or sudo ./libinput-gestures-setup install
     libinput-gestures-setup restart
 
 ### REMOVAL
