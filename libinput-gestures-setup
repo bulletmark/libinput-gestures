@@ -20,12 +20,16 @@ CHECKSECS=6
 
 usage() {
     echo "Usage:"
-    echo "As root: sudo $PROG install|uninstall"
+    echo
+    echo "As root:"
+    echo "  $ sudo $PROG install|uninstall"
     echo "  -d <dir> (option sets DESTDIR for install/uninstall)"
     echo
-    echo "As user: $PROG command [command ..]"
+    echo "As user:"
+    echo "  $ $PROG command [command ..]"
     echo "  where command is any of:"
-    echo "  start|stop|restart|autostart|autostop|status"
+    echo "  start|stop|restart|autostart|autostop|status|desktop|service"
+    echo "  default command = status."
     echo
     exit 1
 }
@@ -360,6 +364,9 @@ else
     fi
 
     # Execute each command given on command line ..
+    if [[ $# -lt 1 ]]; then
+	set -- status
+    fi
     for cmd in "$@"; do
 	if [[ $cmd == restart ]]; then
 	    user_action "stop"

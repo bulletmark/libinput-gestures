@@ -1,4 +1,5 @@
 ### LIBINPUT-GESTURES
+[![AUR](https://img.shields.io/aur/version/libinput-gestures)](https://aur.archlinux.org/packages/libinput-gestures/)
 
 [Libinput-gestures][REPO] is a utility which reads [libinput
 gestures](https://wayland.freedesktop.org/libinput/doc/latest/gestures.html)
@@ -10,6 +11,10 @@ examples in the provided `libinput-gestures.conf` file. My motivation
 for creating this is to use triple swipe up/down to switch workspaces,
 and triple swipe right/left to go backwards/forwards in my browser, as
 per the default configuration.
+
+Note that [libinput does not interpret gestures for
+touchscreens](https://wayland.freedesktop.org/libinput/doc/latest/gestures.html#touchscreen-gestures)
+so this utility can only be used for a touchpad, not a touchscreen.
 
 This small and simple utility is only intended to be used temporarily
 until GNOME and other DE's action libinput gestures natively. It parses
@@ -29,8 +34,8 @@ https://github.com/bulletmark/libinput-gestures.
 
 ### INSTALLATION
 
-You need python 3.5 or later, python2 is not supported. You also need
-libinput release 1.0 or later.
+You need _python_ 3.6 or later, _python2_ is not supported. You also need
+_libinput_ release 1.0 or later.
 
 You **must be a member of the _input_ group** to have permission
 to read the touchpad device:
@@ -69,7 +74,7 @@ Install this software:
 
     git clone https://github.com/bulletmark/libinput-gestures.git
     cd libinput-gestures
-    sudo make install (or sudo ./libinput-gestures-setup install)
+    sudo ./libinput-gestures-setup install
 
 ### CONFIGURATION
 
@@ -142,9 +147,10 @@ will not be parsed. This is for efficiency and because most don't need
 it. This also means your `PATH` is not respected of course so you must
 specify the full path to any command. If you need something more
 complicated, you can add your commands in an executable personal script,
-e.g. `~/bin/libinput-gestures.sh` e.g. with a `#!/bin/sh` shebang . Run
-that script by hand until you get it working then configure the script
-path as your command in your `libinput-gestures.conf`.
+e.g. `~/bin/libinput-gestures.sh` with a `#!/bin/sh` shebang. Optionally
+that script can take arguments. Run that script by hand until you get it
+working then configure the script path as your command in your
+`libinput-gestures.conf`.
 
 In most cases, `libinput-gestures` automatically determines your
 touchpad device. However, you can specify it in your configuration file
@@ -154,36 +160,12 @@ if needed. If you have multiple touchpads you can also specify
 
 ### STARTING AND STOPPING
 
-You must choose between starting the application as a [systemd user
-service](https://wiki.archlinux.org/index.php/Systemd/User), or as a
-[desktop
-application](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html)
-(with an XDG compliant DE such as GNOME and KDE). The systemd user
-service option for `libinput-gestures` was added in Feb 2021 and
-provides more robust management and better logging than the desktop so
-is the preferred choice if your system is recent and your DM/DE supports
-it. Note that some environments [do not correctly start the systemd
-user
-service](https://github.com/bulletmark/libinput-gestures/issues/305) so
-you will have to choose the desktop option in that case.
+To [re-]start the app immediately and also to enable it to start
+automatically at login, just type the following:
 
-Choose one of the two following options:
+    libinput-gestures-setup stop desktop autostart start
 
-1. To set up the application as a [systemd user
-   service](https://wiki.archlinux.org/index.php/Systemd/User):
-
-````
-libinput-gestures-setup service
-````
-
-2. Or instead, to set up the application using your
-   [DE](https://specifications.freedesktop.org/autostart-spec/autostart-spec-latest.html):
-
-````
-libinput-gestures-setup desktop
-````
-
-After choosing one of the above, you can use then run the following commands:
+The following commands are available:
 
 Enable the app to start automatically in the background when you
 log in with:
@@ -211,23 +193,34 @@ Check the status of the app with:
     libinput-gestures-setup status
 
 You can specify multiple user commands to `libinput-gestures-setup` to
-action in sequence. E.g. to shutdown and change from a desktop
-installation to running service installation type:
+action in sequence.
+
+Note that on some uncommon systems then `libinput-gestures-setup start`
+may fail to start the application returning you a message _Don't know
+how to invoke libinput-gestures.desktop_. If you get this error message,
+install the dex package, preferably from your system packages
+repository, and try again.
+
+### SYSTEMD USER SERVICE
+
+By default, `libinput-gestures` is started with your DE as a desktop
+application. There is also an option to start as a [systemd user
+service](https://wiki.archlinux.org/title/Systemd/User). However, on
+some systems this can be unreliable (on system restart, the application
+will get started but occasionally will be unable to receive commands).
+If you want to try it, type:
 
     libinput-gestures-setup stop service autostart start
 
-Note if you are starting using the desktop option and you are using some
-uncommon systems then `libinput-gestures-setup start` may fail to start
-the application returning you a message _Don't know how to invoke
-libinput-gestures.desktop_. If you get this error message, install the
-dex package, preferably from your system packages repository, and try
-again.
+You can switch back to the desktop option with the command:
+
+    libinput-gestures-setup stop desktop autostart start
 
 ### UPGRADE
 
     # cd to source dir, as above
     git pull
-    sudo make install (or sudo ./libinput-gestures-setup install)
+    sudo ./libinput-gestures-setup install
     libinput-gestures-setup restart
 
 ### REMOVAL
@@ -269,7 +262,7 @@ gestures:
 - 3 finger swipe left/right changes workspaces
 
 GNOME 40.0 does not use 4 finger gestures so you can freely assign them
-using libinput-gestures.
+using `libinput-gestures`.
 
 GNOME 3.38 on Wayland and earlier natively implements the following
 gestures:
@@ -312,7 +305,7 @@ configure in your `libinput-gestures.conf`, e.g:
     gesture hold on 4 xdotool key control+t
 
 The above gesture will open a new tab in your browser if you rest 4
-fingers statically on the window.
+fingers statically on the touchpad.
 
 ### AUTOMATIC STOP/RESTART ON D-BUS EVENTS SUCH AS SUSPEND
 
@@ -366,12 +359,17 @@ configuration you are using, regardless of what the issue is about**.
 6. Run `libinput-gestures` in raw mode by repeating the same commands as
    above step but use the `-r` (`--raw`) switch instead of `-d`
    (`--debug`). Raw mode does nothing more than echo the raw gesture
-   events received from `libinput debug-events`. If you see `POINTER_*`
-   events but no `GESTURE_*` events then unfortunately your touchpad
-   and/or libinput combination can report simple finger movements but
-   does not report multi-finger gestures so `libinput-gestures` will not
-   work. Also note that discrimination of gestures is done completely
-   within libinput, before they get to `libinput-gestures`.
+   events received from `libinput debug-events`. You should see the
+   following types of events when you move your fingers:
+
+   - 1 and 2 finger movements should output `POINTER_*` type events
+   - 3 (and above) finger movements should output `GESTURE_*` type events.
+
+   If you do not see any `GESTURE_*` events then unfortunately your
+   touchpad and/or libinput does not report multi-finger gestures so
+   `libinput-gestures` can not work. The discrimination of
+   gestures is done completely within libinput, before they get passed
+   to `libinput-gestures`.
 
 7. Search the web for Linux kernel and/or libinput issues relating to
    your specific touchpad device and/or laptop/pc. Update your BIOS if

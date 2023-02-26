@@ -12,10 +12,7 @@
 # General Public License at <http://www.gnu.org/licenses/> for more
 # details.
 
-DOC = README.md
 SHELLCHECK_OPTS = -eSC2053,SC2064,SC2086,SC1117,SC2162,SC2181,SC2034,SC1090,SC2115
-
-DOCOUT = $(DOC:.md=.html)
 
 all:
 	@echo "Type sudo make install|uninstall"
@@ -29,16 +26,10 @@ uninstall:
 check:
 	flake8 libinput-gestures internal internal-test
 	shellcheck $(SHELLCHECK_OPTS) libinput-gestures-setup list-version-hashes libinput-dummy
-	vermin -i -q -t 3.5 --no-tips libinput-gestures
-	vermin -i -q --no-tips internal internal-test
-
-doc:	$(DOCOUT)
-
-$(DOCOUT): $(DOC)
-	markdown $< >$@
+	vermin --no-tips -i libinput-gestures internal internal-test
 
 test:
 	@./internal-test
 
 clean:
-	rm -rf $(DOCOUT)
+	rm -rf __pycache__

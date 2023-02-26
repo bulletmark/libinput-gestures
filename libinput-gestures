@@ -16,7 +16,6 @@ import threading
 from time import monotonic
 from collections import OrderedDict
 from pathlib import Path
-from distutils.version import LooseVersion as Version
 
 dbus_imported = True
 try:
@@ -30,10 +29,11 @@ session_locked = False
 
 PROGPATH = Path(sys.argv[0])
 PROGNAME = PROGPATH.stem
+HOME = Path('~').expanduser()
 
 # Conf file containing gesture commands.
 # Search first for user file then system file.
-CONFNAME = '{}.conf'.format(PROGNAME)
+CONFNAME = f'{PROGNAME}.conf'
 USERDIR = os.getenv('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
 CONFDIRS = (USERDIR, '/etc')
 
@@ -89,8 +89,11 @@ def get_libinput_vers():
     # Try to use newer libinput interface then fall back to old
     # (depreciated) interface.
     res = run(('libinput', '--version'), check=False)
-    return res.strip() if res else \
-            run(('libinput-list-devices', '--version'), check=False)
+    if res:
+        return res.strip(), True
+
+    res = run(('libinput-list-devices', '--version'), check=False)
+    return res and res.strip(), False
 
 def get_devices_list(cmd_list_devices, device_list):
     'Get list of devices and their attributes (as a dict) from libinput'
@@ -172,14 +175,13 @@ def get_device(name, cmd_list_devices, device_list):
                     for path in dirpath.iterdir():
                         if path.resolve() == devpath:
                             devname = str(path)
-                            evname = '({})'.format(devpath.name)
+                            evname = f'({devpath.name})'
                             break
                     if evname:
                         break
 
         dev['_path'] = devname
-        dev['_diag'] = '{}{}: {}'.format(devname, evname,
-                dev.get('device', '?'))
+        dev['_diag'] = f"{devname}{evname}: {dev.get('device', '?')}"
     return dev
 
 class COMMAND:
@@ -209,7 +211,7 @@ def add_internal_command(cls):
 class ArgumentParser(argparse.ArgumentParser):
     'Custom ArgumentParser to return error text'
     def error(self, msg):
-        raise(Exception(msg))
+        raise Exception(msg)
 
 @add_internal_command
 class COMMAND_internal(COMMAND):
@@ -254,8 +256,8 @@ class COMMAND_internal(COMMAND):
         cmdi = self.commands_list.index(args.action)
 
         if self.CMDTEST[0] and not run(self.CMDTEST, check=False):
-            print('Warning: must install {} to use _internal command.'.format(
-                self.CMDTEST[0]), file=sys.stderr)
+            print(f'Warning: must install {self.CMDTEST[0]} '
+                    'to use _internal command.', file=sys.stderr)
 
         # Only do above check once
         self.CMDTEST[0] = ''
@@ -374,9 +376,9 @@ class GESTURE:
     def add(self, motion, fingers, command, threshold):
         'Add a configured motion command for this gesture'
         if motion not in self.SUPPORTED_MOTIONS:
-            return 'Gesture {} does not support motion "{}".\n' \
-                    'Must be "{}"'.format(self.name.lower(), motion,
-                            '" or "'.join(self.SUPPORTED_MOTIONS))
+            opts = '" or "'.join(self.SUPPORTED_MOTIONS)
+            return f'Gesture {self.name.lower()} does not support '\
+                    f'motion "{motion}".\nMust be "{opts}"'
         if not command:
             return 'No command configured'
 
@@ -422,8 +424,8 @@ class GESTURE:
                 self.motions.get(motion)
 
         if args.verbose:
-            print('{}: {} {} {} {}'.format(PROGNAME, self.name, motion,
-                self.fingers, self.data))
+            print(f'{PROGNAME}: {self.name} {motion} '
+                    f'{self.fingers} {self.data}')
             if command:
                 print('  ', command)
 
@@ -556,8 +558,8 @@ def conf_gesture(lineargs):
     handler = handlers.get(gesture.upper())
 
     if not handler:
-        return 'Gesture "{}" is not supported.\nMust be "{}"'.format(
-                gesture, '" or "'.join([h.lower() for h in handlers]))
+        opts = '" or "'.join([h.lower() for h in handlers])
+        return f'Gesture "{gesture}" is not supported.\nMust be "{opts}"'
 
     # Gesture command can be configured with optional specific finger
     # count so look for that
@@ -614,8 +616,9 @@ def get_conf_line(line):
     conf_func = conf_commands.get(key)
 
     if not conf_func:
-        return 'Configuration command "{}" is not supported.\n' \
-                'Must be "{}"'.format(key, '" or "'.join(conf_commands))
+        opts = '" or "'.join(conf_commands)
+        return f'Configuration command "{key}" is not supported.\n' \
+                f'Must be "{opts}"'
 
     return conf_func(argslist[0] if argslist else '')
 
@@ -629,18 +632,17 @@ def get_conf(conffile, confname):
 
             errmsg = get_conf_line(line)
             if errmsg:
-                sys.exit('Error at line {} in file {}:\n>> {} <<\n{}.'.format(
-                    num, confname, line, errmsg))
+                sys.exit(f'Error at line {num} in file {confname}:\n'
+                        f'>> {line} <<\n{errmsg}.')
 
 def unexpanduser(cfile):
     'Return absolute path name, with $HOME replaced by ~'
-    relslash = Path(os.path.abspath(str(cfile)))
-    try:
-        relhome = relslash.relative_to(os.getenv('HOME'))
-    except (ValueError, TypeError):
-        relhome = None
+    cfile_abs = cfile.resolve()
 
-    return ('~/' + str(relhome)) if relhome else str(relslash)
+    if cfile_abs.parts[:len(HOME.parts)] != HOME.parts:
+        return str(cfile_abs)
+
+    return str(Path('~', *cfile_abs.parts[len(HOME.parts):]))
 
 # Search for configuration file. Use file given as command line
 # argument, else look for file in search dir order.
@@ -648,15 +650,15 @@ def read_conf(conffile, defname):
     if conffile:
         confpath = Path(conffile)
         if not confpath.exists():
-            sys.exit('Conf file "{}" does not exist.'.format(conffile))
+            sys.exit(f'Conf file "{conffile}" does not exist.')
     else:
         for confdir in CONFDIRS:
             confpath = Path(confdir, defname)
             if confpath.exists():
                 break
         else:
-            sys.exit('No file {} in {}.'.format(defname, ' or '.join(
-                [unexpanduser(Path(c)) for c in CONFDIRS])))
+            opts = ' or '.join([unexpanduser(Path(c)) for c in CONFDIRS])
+            sys.exit(f'No file {defname} in {opts}.')
 
     # Hide any personal user dir/names from diag output
     confname = unexpanduser(confpath)
@@ -717,11 +719,11 @@ def main():
         args.verbose = True
 
     # Libinput changed the way in which it's utilities are called
-    libvers = get_libinput_vers()
+    libvers, has_subcmd = get_libinput_vers()
     if not libvers:
         sys.exit('libinput helper tools do not seem to be installed?')
 
-    if Version(libvers) >= Version('1.8'):
+    if has_subcmd:
         cmd_debug_events = 'libinput debug-events'
         cmd_list_devices = 'libinput list-devices'
     else:
@@ -733,12 +735,14 @@ def main():
         xsession = os.getenv('XDG_SESSION_DESKTOP') or \
                 os.getenv('DESKTOP_SESSION') or 'unknown'
         xtype = os.getenv('XDG_SESSION_TYPE') or 'unknown'
-        print('{}: session {}+{} on {}, python {}, libinput {}'.format(
-            PROGNAME, xsession, xtype, platform.platform(),
-            platform.python_version(), libvers))
+        xstr = f'session {xsession}+{xtype}'
+        pf = platform.platform()
+        pfpy = f'python {platform.python_version()}'
+        lstr = f'libinput {libvers}'
+        print(f'{PROGNAME}: {xstr} on {pf}, {pfpy}, {lstr}')
 
         # Output hash version/checksum of this program
-        print('Hash: {}'.format(gethash()))
+        print(f'Hash: {gethash()}')
 
     # Read and process the conf file
     confname = read_conf(args.conffile, CONFNAME)
@@ -746,21 +750,20 @@ def main():
     # List out available gestures if that is asked for
     if args.verbose:
         if not args.raw:
-            print('Gestures configured in {}:'.format(confname))
+            print(f'Gestures configured in {confname}:')
             for h in handlers.values():
                 for mpair, cmd in h.motions.items():
                     motion, fingers = (mpair, '') \
                             if isinstance(mpair, str) else mpair
-                    print('{} {:10}{:>2} {}'.format(h.name.lower(), motion,
-                        fingers, cmd))
+                    print(f'{h.name.lower()} {motion:10}{fingers:>2} {cmd}')
 
             if swipe_min_threshold:
-                print('swipe_threshold {}'.format(swipe_min_threshold))
+                print(f'swipe_threshold {swipe_min_threshold}')
             if timeoutv != DEFAULT_TIMEOUT:
-                print('timeout {}'.format(timeoutv))
+                print(f'timeout {timeoutv}')
 
         if args.device:
-            print('device {}'.format(args.device))
+            print(f'device {args.device}')
 
     # Get touchpad device
     if not args.device or args.device.lower() != "all":
@@ -772,9 +775,9 @@ def main():
 
     if args.verbose:
         if device:
-            print('{}: device {}'.format(PROGNAME, device.get('_diag')))
+            print(f"{PROGNAME}: device {device.get('_diag')}")
         else:
-            print('{}: monitoring all devices'.format(PROGNAME))
+            print(f'{PROGNAME}: monitoring all devices')
 
     # If just called to list out above environment info then exit now
     if args.list:
@@ -787,16 +790,15 @@ def main():
     user = getpass.getuser()
     lockfile, pidfile = open_lock(PROGNAME, user)
     if not lockfile:
-        sys.exit('{} is already running for {}, terminating ..'.format(
-            PROGNAME, user))
+        sys.exit(f'{PROGNAME} is already running for {user}, terminating ..')
 
     # Set up square of swipe threshold
     abzsquare = swipe_min_threshold**2
 
     # Note your must "sudo gpasswd -a $USER input" then reboot for
     # permission to access the device.
-    devstr = ' --device {}'.format(device.get('_path')) if device else ''
-    command = 'stdbuf -oL -- {}{}'.format(cmd_debug_events, devstr)
+    devstr = f" --device {device.get('_path')}" if device else ''
+    command = f'stdbuf -oL -- {cmd_debug_events}{devstr}'
 
     if dbus_imported:
         t = threading.Thread(target=lockcheck)
@@ -807,7 +809,7 @@ def main():
             bufsize=1, universal_newlines=True)
 
     # Store PIDs for potential kill
-    pidfile.write('{}\n{}\n'.format(os.getpid(), cmd.pid))
+    pidfile.write(f'{os.getpid()}\n{cmd.pid}\n')
     pidfile.flush()
     os.fsync(pidfile.fileno())
 
@@ -830,7 +832,11 @@ def main():
 
         # Split received message line into relevant fields
         dev, gevent, time, other = line.strip().split(maxsplit=3)
-        gesture, event = gevent[8:].split('_')
+        try:
+            gesture, event = gevent[8:].split('_')
+        except Exception:
+            continue
+
         fingers, *argslist = other.split(maxsplit=1)
         params = argslist[0] if argslist else ''
 
@@ -839,15 +845,15 @@ def main():
             if handler:
                 # Split parameters into list of clean numbers
                 if not handler.update(re.split(r'[^-.\d]+', params)):
-                    print('Could not parse {} {}: {}'.format(gesture, event,
-                        params), file=sys.stderr)
+                    print('Could not parse {gesture} {event}: {params}',
+                            file=sys.stderr)
 
         elif event == 'BEGIN':
             handler = handlers.get(gesture)
             if handler:
                 handler.begin(fingers)
             else:
-                print('Unknown gesture received: {}.'.format(gesture),
+                print(f'Unknown gesture received: {gesture}.',
                         file=sys.stderr)
         elif event == 'END':
             # Ignore gesture if final action is cancelled
@@ -856,8 +862,8 @@ def main():
                     handler.end()
                 handler = None
         else:
-            print('Unknown gesture + event received: {} + {}.'.format(gesture,
-                event), file=sys.stderr)
+            print(f'Unknown gesture {gesture} + event {event} received.',
+                    file=sys.stderr)
 
 if __name__ == '__main__':
     main()

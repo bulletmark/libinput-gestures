@@ -411,7 +411,7 @@ opt.add_argument('-q', '--quiet', action='store_true',
 opt.add_argument('-l', '--list', action='store_true',
         help='list test sets')
 opt.add_argument('testset', nargs='*', type=int,
-        help='test sets to execute, default all {}'.format(len(TESTS)))
+        help=f'test sets to execute, default all {len(TESTS)}')
 args = opt.parse_args()
 
 lastnum = 0
@@ -430,14 +430,14 @@ def test(fname, action, end, num=-1, start=-1):
     lastnum = num
     lastpos = end
 
-    cmd = './{} -n -t -c {} -i {} {} {}'.format(PROG, fname, start, num, action)
+    cmd = f'./{PROG} -n -t -c {fname} -i {start} {num} {action}'
     res = subprocess.run(cmd.split(), universal_newlines=True,
             stdout=subprocess.PIPE)
     if res.returncode != 0:
         return 'Command failed'
     out = res.stdout.strip().splitlines()[-1].split()[-1]
     res_end = int(out) if out.isdigit() else start
-    return 'should be {}'.format(res_end) if res_end != end else None
+    return f'should be {res_end}' if res_end != end else None
 
 tmpfile = tempfile.NamedTemporaryFile('r+t')
 sets = 0
@@ -455,10 +455,10 @@ for testset, (title, confstr, tests) in enumerate(TESTS, 1):
     tmpfile.flush()
     lastpos = 0
     lastnum = 0
-    print('======= Set {}: {}:\n{}'.format(testset, title, confstr))
+    print(f'======= Set {testset}: {title}:\n{confstr}')
     for fargs in tests:
         if isinstance(fargs, str):
-            print(' ###### Subset {}:'.format(fargs))
+            print(f' ###### Subset {fargs}:')
             continue
         total += 1
 
@@ -467,10 +467,10 @@ for testset, (title, confstr, tests) in enumerate(TESTS, 1):
 
         res = test(tmpfile.name, *fargs)
         if res:
-            print(' FAILED: {}: {}'.format(fargs, res))
+            print(f' FAILED: {fargs}: {res}')
             bad += 1
         elif not args.quiet:
-            print(' ok    : {}'.format(fargs))
+            print(f' ok    : {fargs}')
 
-print('\nTotal sets = {}, tests = {}, failed = {}'.format(sets, total, bad))
+print(f'\nTotal sets = {sets}, tests = {total}, failed = {bad}')
 sys.exit(0 if bad == 0 else 1)

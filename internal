@@ -46,7 +46,7 @@ def showgrid(pos, num, cols):
     for i in range(num):
         end = '\n' if (i % cols) == (cols - 1) else ''
         if i == pos:
-            print(' {:02} '.format(i), end=end)
+            print(f' {i:02} ', end=end)
         else:
             print(' ** ', end=end)
     if end != '\n':
@@ -58,7 +58,8 @@ if args.set is not None:
 
 if args.display is not None:
     for i in range(args.num):
-        print('{} {} -'.format(i, '*' if i == args.display else '-'))
+        ds = '*' if i == args.display else '-'
+        print(f'{i} {ds} -')
     sys.exit(0)
 
 if args.initial is None:
@@ -73,18 +74,18 @@ else:
 lg = import_path(NAME)
 icmd = lg.internal_commands[CMD]
 
-icmd.CMDLIST = '{} -d {} {}'.format(PROG, start, args.num).split()
-icmd.CMDSET = '{} {} -s'.format(PROG, args.num).split()
+icmd.CMDLIST = f'{PROG} -d {start} {args.num}'.split()
+icmd.CMDSET = f'{PROG} {args.num} -s'.split()
 
 lg.read_conf(args.conffile, NAME + '.conf')
 motions = lg.handlers[GESTURE.upper()].motions
 actions = {k: v for k, v in motions.items() if isinstance(v, icmd)}
 
 if not args.action or args.action not in actions:
-    opt.error('action must be one of {}'.format(list(actions.keys())))
+    opt.error(f'action must be one of {list(actions.keys())}')
 
 cmd = motions[args.action]
-print('Command "{} {} is "{}"'.format(GESTURE, args.action, cmd))
+print(f'Command "{GESTURE} {args.action} is "{cmd}"')
 res = cmd.run(block=True)
 
 if res:
@@ -95,12 +96,12 @@ else:
     end = start
 
 if end < 0 or end >= args.num:
-    sys.exit('Desktop change from {} to {}, out of range 0 to <{}!'.format(
-        start, end, args.num))
+    sys.exit(f'Desktop change from {start} to {end}, '
+            f'out of range 0 to <{args.num}!')
 
 if args.text:
     if start != end:
-        print('Desktop change from {} to {}'.format(start, end))
+        print(f'Desktop change from {start} to {end}')
     else:
         print('No change')
 else:
