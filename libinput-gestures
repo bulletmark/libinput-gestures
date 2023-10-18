@@ -370,9 +370,10 @@ class GESTURE:
         'Initialise this gesture at program start'
         self.name = type(self).__name__
         self.motions = OrderedDict()
+        self.thresholds = OrderedDict()
         self.has_extended = False
 
-    def add(self, motion, fingers, command):
+    def add(self, motion, fingers, command, threshold):
         'Add a configured motion command for this gesture'
         if motion not in self.SUPPORTED_MOTIONS:
             opts = '" or "'.join(self.SUPPORTED_MOTIONS)
@@ -385,9 +386,8 @@ class GESTURE:
         # their discrimination
         if self.extended_text and self.extended_text in motion:
             self.has_extended = True
-
         key = (motion, fingers) if fingers else motion
-
+        
         try:
             cmds = shlex.split(command)
         except Exception as e:
@@ -397,6 +397,7 @@ class GESTURE:
 
         try:
             self.motions[key] = cls(cmds)
+            self.thresholds[key] = threshold
         except Exception as e:
             return str(e)
 
@@ -406,7 +407,16 @@ class GESTURE:
         'Initialise this gesture at the start of motion'
         self.fingers = fingers
         self.data = [0.0, 0.0]
+        self.moved=0
         self.starttime = monotonic()
+
+    def thresholdmove(self, motion):
+        'Get threshold for update command'
+        thresh = self.thresholds.get((motion, self.fingers)) or \
+                self.thresholds.get(motion)
+        if thresh == None:
+            thresh=0
+        return int(thresh)
 
     def action(self, motion):
         'Action a motion command for this gesture'
@@ -445,6 +455,22 @@ class SWIPE(GESTURE):
 
         self.data[0] += x
         self.data[1] += y
+        x2, y2 = self.data
+        abx = abs(x2)
+        aby = abs(y2)
+        if abx > aby:
+            motion = 'left' if x2 < 0 else 'right'
+            if self.has_extended and abx > 0 and aby / abx > OBLIQUE_RATIO:
+                motion += '_up' if y2 < 0 else '_down'
+        else:
+            motion = 'up' if y2 < 0 else 'down'
+            if self.has_extended and aby > 0 and abx / aby > OBLIQUE_RATIO:
+                motion = ('left_' if x2 < 0 else 'right_') + motion
+        if self.thresholdmove(motion) > 0:
+            if abx**2 + aby**2-self.moved**2 > self.thresholdmove(motion):
+                self.moved+=self.thresholdmove(motion)
+                self.action(motion)
+                
         return True
 
     def end(self):
@@ -468,8 +494,8 @@ class SWIPE(GESTURE):
             motion = 'up' if y < 0 else 'down'
             if self.has_extended and aby > 0 and abx / aby > OBLIQUE_RATIO:
                 motion = ('left_' if x < 0 else 'right_') + motion
-
-        self.action(motion)
+        if self.thresholdmove(motion)==0:
+            self.action(motion)
 
 @add_gesture_handler
 class PINCH(GESTURE):
@@ -542,9 +568,13 @@ def conf_gesture(lineargs):
         command = fcommand[0] if fcommand else ''
     else:
         fingers = None
-
+    thresh, *gcommand = command.split(maxsplit=1)
+    if thresh.isnumeric():
+        command = gcommand[0] if gcommand else ''
+    else:
+        thresh = 0
     # Add the configured gesture
-    return handler.add(motion.lower(), fingers, command)
+    return handler.add(motion.lower(), fingers, command, thresh)
 
 @add_conf_command
 def conf_device(lineargs):
