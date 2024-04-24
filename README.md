@@ -42,7 +42,9 @@ to read the touchpad device:
 
     sudo gpasswd -a $USER input
 
-After executing the above command, reboot your system.
+After executing the above command, **reboot** your system.
+
+**NOTE** Rebboting your System important 
 
 Most/many users will require to install the following although neither are
 actual dependencies because some custom configurations will not require
