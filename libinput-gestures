@@ -88,7 +88,7 @@ def runcmd(cmd: Sequence[str], *, check: bool = True, block: bool = True) -> str
                 stderr=(None if check else subprocess.DEVNULL),
             )
         else:
-            result = 'ok' if subprocess.Popen(cmd) else ''
+            p = subprocess.Popen(cmd); p.wait(); result = 'ok' if p else ''
     except Exception as e:
         result = ''
         if check:
