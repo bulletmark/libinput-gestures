@@ -784,10 +784,14 @@ def dbus_listener() -> None:
     "Listen on DBus"
     DBusGMainLoop(set_as_default=True)
 
-    def proc(busname: str, vals: dict[str, str], _) -> None:
+    def proc(
+        interface_name: str,
+        changed_properties: dict[str, str],
+        invalidated_properties: list[str],
+    ) -> None:
         global session_locked
-        if busname == 'org.freedesktop.login1.Session':
-            if (val := vals.get('LockedHint')) is not None:
+        if interface_name == 'org.freedesktop.login1.Session':
+            if (val := changed_properties.get('LockedHint')) is not None:
                 session_locked = bool(val)
 
     # Listen to get session locked state
