@@ -232,9 +232,10 @@ class COMMAND:
 internal_commands = {}
 
 
-def add_internal_command(cls) -> None:
+def add_internal_command(cls):
     "Add configuration command to command lookup table based on name"
     internal_commands[re.sub('^COMMAND', '', cls.__name__)] = cls
+    return cls
 
 
 class MyArgumentParser(argparse.ArgumentParser):
@@ -405,9 +406,15 @@ class COMMAND_drag(COMMAND):
     def __init__(self, largs: list):
         super().__init__(largs)
         self._uinput = None
-        self._release_delay = float(largs[1]) / 1000.0 if len(largs) > 1 else 0.0
+        self._ecodes = None
+        self._lock = threading.Lock()
         self._release_timer: threading.Timer | None = None
         self._dragging = False
+        try:
+            self._release_delay = float(largs[1]) / 1000.0 if len(largs) > 1 else 0.0
+        except ValueError:
+            print(f'Warning: invalid _drag delay "{largs[1]}", using 0', file=sys.stderr)
+            self._release_delay = 0.0
         try:
             from evdev import UInput, ecodes
             cap = {ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y], ecodes.EV_KEY: [ecodes.BTN_LEFT]}
@@ -424,42 +431,45 @@ class COMMAND_drag(COMMAND):
     def mousedown(self) -> None:
         if not self._uinput:
             return
-        if self._release_timer is not None:
-            self._release_timer.cancel()
-            self._release_timer = None
-            return
-        ec = self._ecodes
-        self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 1)
-        self._uinput.syn()
-        self._dragging = True
+        with self._lock:
+            if self._release_timer is not None:
+                self._release_timer.cancel()
+                self._release_timer = None
+                return
+            self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 1)
+            self._uinput.syn()
+            self._dragging = True
 
     def mousemove(self, dx: int, dy: int) -> None:
         if not self._uinput:
             return
-        ec = self._ecodes
         if dx:
-            self._uinput.write(ec.EV_REL, ec.REL_X, dx)
+            self._uinput.write(self._ecodes.EV_REL, self._ecodes.REL_X, dx)
         if dy:
-            self._uinput.write(ec.EV_REL, ec.REL_Y, dy)
+            self._uinput.write(self._ecodes.EV_REL, self._ecodes.REL_Y, dy)
         self._uinput.syn()
 
     def _do_mouseup(self) -> None:
-        self._release_timer = None
-        self._dragging = False
-        if not self._uinput:
-            return
-        ec = self._ecodes
-        self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 0)
-        self._uinput.syn()
+        with self._lock:
+            self._release_timer = None
+            self._dragging = False
+            if not self._uinput:
+                return
+            self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+            self._uinput.syn()
 
     def mouseup(self) -> None:
-        if not self._uinput or not self._dragging:
-            return
-        if self._release_delay > 0:
-            self._release_timer = threading.Timer(self._release_delay, self._do_mouseup)
-            self._release_timer.start()
-        else:
-            self._do_mouseup()
+        with self._lock:
+            if not self._uinput or not self._dragging:
+                return
+            if self._release_delay > 0:
+                self._release_timer = threading.Timer(self._release_delay, self._do_mouseup)
+                self._release_timer.start()
+            else:
+                self._release_timer = None
+                self._dragging = False
+                self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+                self._uinput.syn()
 
     def run(self) -> None:
         pass
@@ -723,13 +733,14 @@ class DRAG(GESTURE):
     "Class to handle continuous drag gestures via simulated mouse button hold and movement"
 
     SUPPORTED_MOTIONS = ('drag',)
+    _cmd: COMMAND | None = None
 
     def begin(self, fingers: str) -> None:
         super().begin(fingers)
         key = ('drag', fingers) if fingers else 'drag'
         self._cmd = self.motions.get(key) or self.motions.get('drag')
         if self._cmd and not args.debug:
-            if type(self._cmd).__name__ == 'COMMAND_drag':
+            if isinstance(self._cmd, COMMAND_drag):
                 self._cmd.mousedown()
             else:
                 runcmd(self._cmd.argslist + ['mousedown', '1'], block=False)
@@ -745,7 +756,7 @@ class DRAG(GESTURE):
         if self._cmd and not args.debug:
             dx, dy = round(x), round(y)
             if dx or dy:
-                if type(self._cmd).__name__ == 'COMMAND_drag':
+                if isinstance(self._cmd, COMMAND_drag):
                     self._cmd.mousemove(dx, dy)
                 else:
                     runcmd(self._cmd.argslist + ['mousemove_relative', '--', str(dx), str(dy)])
@@ -755,15 +766,15 @@ class DRAG(GESTURE):
         if args.verbose:
             print(f'{PROGNAME}: DRAG drag {self.fingers} {self.data}')
         if self._cmd and not args.debug:
-            if type(self._cmd).__name__ == 'COMMAND_drag':
+            if isinstance(self._cmd, COMMAND_drag):
                 self._cmd.mouseup()
             else:
                 runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
 
     def cancel(self) -> None:
         "Release mouse button if gesture is cancelled mid-drag"
-        if hasattr(self, '_cmd') and self._cmd and not args.debug:
-            if type(self._cmd).__name__ == 'COMMAND_drag':
+        if self._cmd and not args.debug:
+            if isinstance(self._cmd, COMMAND_drag):
                 self._cmd.mouseup()
             else:
                 runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
@@ -1114,10 +1125,7 @@ def main() -> None:
 
         elif event == 'BEGIN':
             drag_handler = handlers.get('DRAG')
-            if gesture == 'SWIPE' and drag_handler and (
-                drag_handler.motions.get(('drag', fingers))
-                or drag_handler.motions.get('drag')
-            ):
+            if gesture == 'SWIPE' and drag_handler and drag_handler.motions.get(('drag', fingers)):
                 handler = drag_handler
                 handler.begin(fingers)
             elif handler := handlers.get(gesture):

@@ -2,7 +2,10 @@
 name = "libinput-gestures"
 version = "2.80"
 requires-python = ">=3.10"
-dependencies = ["evdev"]
+dependencies = []
+
+[project.optional-dependencies]
+uinput = ["evdev"]
 
 [dependency-groups]
 dev = ["ruff", "ty"]
