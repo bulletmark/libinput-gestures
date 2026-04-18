@@ -1,3 +1,12 @@
+[project]
+name = "libinput-gestures"
+version = "2.80"
+requires-python = ">=3.10"
+dependencies = ["evdev"]
+
+[dependency-groups]
+dev = ["ruff", "ty"]
+
 [tool.mypy]
 implicit_optional = true
 warn_no_return = false

@@ -398,6 +398,54 @@ class COMMAND_internal(COMMAND):
         )
 
 
+@add_internal_command
+class COMMAND_drag(COMMAND):
+    "Internal drag command handler using a uinput virtual mouse device (requires python3-evdev)"
+
+    def __init__(self, largs: list):
+        super().__init__(largs)
+        self._uinput = None
+        try:
+            from evdev import UInput, ecodes
+            cap = {ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y], ecodes.EV_KEY: [ecodes.BTN_LEFT]}
+            self._uinput = UInput(cap, name='libinput-gestures-drag')
+            self._ecodes = ecodes
+        except ImportError:
+            print(
+                'Warning: python3-evdev is not installed; _drag command unavailable.',
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(f'Warning: failed to create uinput device: {e}', file=sys.stderr)
+
+    def mousedown(self) -> None:
+        if not self._uinput:
+            return
+        ec = self._ecodes
+        self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 1)
+        self._uinput.syn()
+
+    def mousemove(self, dx: int, dy: int) -> None:
+        if not self._uinput:
+            return
+        ec = self._ecodes
+        if dx:
+            self._uinput.write(ec.EV_REL, ec.REL_X, dx)
+        if dy:
+            self._uinput.write(ec.EV_REL, ec.REL_Y, dy)
+        self._uinput.syn()
+
+    def mouseup(self) -> None:
+        if not self._uinput:
+            return
+        ec = self._ecodes
+        self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 0)
+        self._uinput.syn()
+
+    def run(self) -> None:
+        pass
+
+
 # Table of gesture handlers
 handlers = {}
 
@@ -476,6 +524,10 @@ class GESTURE(ABC):
 
     def update(self, coords: str) -> bool:
         return True
+
+    def cancel(self) -> None:
+        "Called when a gesture is cancelled mid-motion; override to clean up"
+        pass
 
     def action(self, motion: str, *, command: COMMAND | None = None) -> None:
         "Action a motion command for this gesture"
@@ -645,6 +697,57 @@ class HOLD(GESTURE):
             motion = f'on-{delay:.2f}'
 
         self.action(motion, command=command)
+
+
+@add_gesture_handler
+class DRAG(GESTURE):
+    "Class to handle continuous drag gestures via simulated mouse button hold and movement"
+
+    SUPPORTED_MOTIONS = ('drag',)
+
+    def begin(self, fingers: str) -> None:
+        super().begin(fingers)
+        key = ('drag', fingers) if fingers else 'drag'
+        self._cmd = self.motions.get(key) or self.motions.get('drag')
+        if self._cmd and not args.debug:
+            if type(self._cmd).__name__ == 'COMMAND_drag':
+                self._cmd.mousedown()
+            else:
+                runcmd(self._cmd.argslist + ['mousedown', '1'], block=False)
+
+    def update(self, coords: str) -> bool:
+        try:
+            x = float(coords[0])
+            y = float(coords[1])
+        except (ValueError, IndexError):
+            return False
+        self.data[0] += x
+        self.data[1] += y
+        if self._cmd and not args.debug:
+            dx, dy = round(x), round(y)
+            if dx or dy:
+                if type(self._cmd).__name__ == 'COMMAND_drag':
+                    self._cmd.mousemove(dx, dy)
+                else:
+                    runcmd(self._cmd.argslist + ['mousemove_relative', '--', str(dx), str(dy)])
+        return True
+
+    def end(self) -> None:
+        if args.verbose:
+            print(f'{PROGNAME}: DRAG drag {self.fingers} {self.data}')
+        if self._cmd and not args.debug:
+            if type(self._cmd).__name__ == 'COMMAND_drag':
+                self._cmd.mouseup()
+            else:
+                runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
+
+    def cancel(self) -> None:
+        "Release mouse button if gesture is cancelled mid-drag"
+        if hasattr(self, '_cmd') and self._cmd and not args.debug:
+            if type(self._cmd).__name__ == 'COMMAND_drag':
+                self._cmd.mouseup()
+            else:
+                runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
 
 
 # Table of configuration commands
@@ -991,7 +1094,14 @@ def main() -> None:
                     )
 
         elif event == 'BEGIN':
-            if handler := handlers.get(gesture):
+            drag_handler = handlers.get('DRAG')
+            if gesture == 'SWIPE' and drag_handler and (
+                drag_handler.motions.get(('drag', fingers))
+                or drag_handler.motions.get('drag')
+            ):
+                handler = drag_handler
+                handler.begin(fingers)
+            elif handler := handlers.get(gesture):
                 handler.begin(fingers)
             else:
                 print(f'Unknown gesture received: {gesture}.', file=sys.stderr)
@@ -1000,6 +1110,8 @@ def main() -> None:
             if handler:
                 if params != 'cancelled':
                     handler.end()
+                else:
+                    handler.cancel()
                 handler = None
         else:
             print(
