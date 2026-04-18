@@ -405,6 +405,9 @@ class COMMAND_drag(COMMAND):
     def __init__(self, largs: list):
         super().__init__(largs)
         self._uinput = None
+        self._release_delay = float(largs[1]) / 1000.0 if len(largs) > 1 else 0.0
+        self._release_timer: threading.Timer | None = None
+        self._dragging = False
         try:
             from evdev import UInput, ecodes
             cap = {ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y], ecodes.EV_KEY: [ecodes.BTN_LEFT]}
@@ -421,9 +424,14 @@ class COMMAND_drag(COMMAND):
     def mousedown(self) -> None:
         if not self._uinput:
             return
+        if self._release_timer is not None:
+            self._release_timer.cancel()
+            self._release_timer = None
+            return
         ec = self._ecodes
         self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 1)
         self._uinput.syn()
+        self._dragging = True
 
     def mousemove(self, dx: int, dy: int) -> None:
         if not self._uinput:
@@ -435,12 +443,23 @@ class COMMAND_drag(COMMAND):
             self._uinput.write(ec.EV_REL, ec.REL_Y, dy)
         self._uinput.syn()
 
-    def mouseup(self) -> None:
+    def _do_mouseup(self) -> None:
+        self._release_timer = None
+        self._dragging = False
         if not self._uinput:
             return
         ec = self._ecodes
         self._uinput.write(ec.EV_KEY, ec.BTN_LEFT, 0)
         self._uinput.syn()
+
+    def mouseup(self) -> None:
+        if not self._uinput or not self._dragging:
+            return
+        if self._release_delay > 0:
+            self._release_timer = threading.Timer(self._release_delay, self._do_mouseup)
+            self._release_timer.start()
+        else:
+            self._do_mouseup()
 
     def run(self) -> None:
         pass
