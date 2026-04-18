@@ -471,6 +471,17 @@ class COMMAND_drag(COMMAND):
                 self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
                 self._uinput.syn()
 
+    def end_grace(self) -> None:
+        "If a release timer is pending, cancel it and release BTN_LEFT immediately"
+        with self._lock:
+            if self._release_timer is not None:
+                self._release_timer.cancel()
+                self._release_timer = None
+                self._dragging = False
+                if self._uinput:
+                    self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+                    self._uinput.syn()
+
     def run(self) -> None:
         pass
 
@@ -778,6 +789,11 @@ class DRAG(GESTURE):
                 self._cmd.mouseup()
             else:
                 runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
+
+    def end_grace(self) -> None:
+        "End any pending release grace period immediately"
+        if self._cmd and isinstance(self._cmd, COMMAND_drag):
+            self._cmd.end_grace()
 
 
 # Table of configuration commands
@@ -1128,10 +1144,13 @@ def main() -> None:
             if gesture == 'SWIPE' and drag_handler and drag_handler.motions.get(('drag', fingers)):
                 handler = drag_handler
                 handler.begin(fingers)
-            elif handler := handlers.get(gesture):
-                handler.begin(fingers)
             else:
-                print(f'Unknown gesture received: {gesture}.', file=sys.stderr)
+                if drag_handler:
+                    drag_handler.end_grace()
+                if handler := handlers.get(gesture):
+                    handler.begin(fingers)
+                else:
+                    print(f'Unknown gesture received: {gesture}.', file=sys.stderr)
         elif event == 'END':
             # Ignore gesture if final action is cancelled
             if handler:
