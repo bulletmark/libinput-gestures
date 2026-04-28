@@ -71,11 +71,16 @@ them. If you are unsure initially, install both of them.
     # E.g. On Fedora:
     sudo dnf install wmctrl xdotool python3-evdev
 
-The `_drag` command also requires write access to `/dev/uinput`. The
-recommended approach is a udev rule:
+The `_drag` command also requires write access to `/dev/uinput`. First,
+ensure the `uinput` kernel module is loaded and set to load on boot:
+
+    sudo modprobe uinput
+    echo uinput | sudo tee /etc/modules-load.d/uinput.conf
+
+Then apply a udev rule so the `input` group has write access:
 
     echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' | sudo tee /etc/udev/rules.d/99-uinput.rules
-    sudo udevadm control --reload-rules && sudo udevadm trigger
+    sudo udevadm trigger /dev/uinput
 
 NOTE: Arch users can now just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.

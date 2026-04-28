@@ -471,6 +471,10 @@ class COMMAND_drag(COMMAND):
                 self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
                 self._uinput.syn()
 
+    def in_grace_period(self) -> bool:
+        with self._lock:
+            return self._release_timer is not None
+
     def end_grace(self) -> None:
         "If a release timer is pending, cancel it and release BTN_LEFT immediately"
         with self._lock:
@@ -1114,6 +1118,12 @@ def main() -> None:
             print(line.strip())
             continue
 
+        # Cancel drag grace period immediately on any pointer movement (e.g. single finger)
+        drag_handler = handlers.get('DRAG')
+        if drag_handler and drag_handler._cmd and isinstance(drag_handler._cmd, COMMAND_drag) \
+                and drag_handler._cmd.in_grace_period() and 'POINTER_MOTION' in line:
+            drag_handler.end_grace()
+
         # Only interested in gestures
         if 'GESTURE_' not in line or ' +' not in line:
             continue
@@ -1140,7 +1150,6 @@ def main() -> None:
                     )
 
         elif event == 'BEGIN':
-            drag_handler = handlers.get('DRAG')
             if gesture == 'SWIPE' and drag_handler and drag_handler.motions.get(('drag', fingers)):
                 handler = drag_handler
                 handler.begin(fingers)
