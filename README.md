@@ -60,15 +60,27 @@ them. If you are unsure initially, install both of them.
 |------------|-------------|
 |`wmctrl`    |Necessary for `_internal` command, as per default configuration|
 |`xdotool`   |Simulates keyboard and mouse actions for Xorg or XWayland based apps|
+|`python3-evdev`|Necessary for `_drag` command (continuous drag/text selection on Wayland)|
 
     # E.g. On Arch:
-    sudo pacman -S wmctrl xdotool
+    sudo pacman -S wmctrl xdotool python-evdev
 
     # E.g. On Debian based systems, e.g. Ubuntu:
-    sudo apt-get install wmctrl xdotool
+    sudo apt-get install wmctrl xdotool python3-evdev
 
     # E.g. On Fedora:
-    sudo dnf install wmctrl xdotool
+    sudo dnf install wmctrl xdotool python3-evdev
+
+The `_drag` command also requires write access to `/dev/uinput`. First,
+ensure the `uinput` kernel module is loaded and set to load on boot:
+
+    sudo modprobe uinput
+    echo uinput | sudo tee /etc/modules-load.d/uinput.conf
+
+Then apply a udev rule so the `input` group has write access:
+
+    echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+    sudo udevadm trigger /dev/uinput
 
 NOTE: Arch users can now just install [_libinput-gestures from the
 AUR_][AUR]. Then skip to the next CONFIGURATION section.
@@ -112,6 +124,7 @@ and options described in that file. The available gestures are:
 |`pinch anticlockwise` ||
 |`hold on`             |Open new web browser tab. See description of [hold gestures](#hold-gestures). |
 |`hold on+N` (for `N` seconds, e.g. 1.5) |After extra hold time delay, close browser tab. See description of [hold gestures](#hold-gestures). |
+|`drag drag`           |Continuous text selection / drag-and-drop. See description of [drag gestures](#drag-gestures). |
 
 NOTE: If you don't use "natural" scrolling direction for your touchpad
 then you may want to swap the default left/right and up/down
@@ -350,6 +363,46 @@ running `libinput-gestures-setup stop`). Then experiment with different
 holds which will print the times to the screen so you can choose what to
 configure for your hold gestures. Run `libinput-gestures-setup restart`
 to restart `libinput-gestures` after updating your configuration.
+
+### DRAG GESTURES
+
+Drag gestures simulate holding mouse button 1 while tracking finger
+movement, enabling continuous text selection and drag-and-drop. Unlike
+swipe gestures which fire a single action at the end, drag gestures emit
+mouse events in real time throughout the motion.
+
+To enable 3-finger drag, add the following to your
+`~/.config/libinput-gestures.conf`:
+
+    gesture drag drag 3 _drag
+
+The `_drag` internal command uses a persistent `uinput` virtual mouse
+device to inject `BTN_LEFT` + relative mouse movement events. It works
+natively with both Wayland and Xorg clients and requires `python3-evdev`
+and write access to `/dev/uinput` (see [INSTALLATION](#installation)).
+
+#### Lift-and-continue delay
+
+An optional delay in milliseconds can be specified to enable
+lift-and-continue behaviour — the mouse button is held for that duration
+after fingers are lifted, allowing you to reposition fingers at the
+touchpad edge and resume the selection:
+
+    gesture drag drag 3 _drag 500
+
+A new gesture with the same finger count within the delay window resumes
+the drag seamlessly. Any other gesture (different finger count, tap,
+etc.) ends the drag immediately regardless of the remaining delay.
+
+#### GNOME Wayland note
+
+On GNOME Wayland, the compositor intercepts 3-finger swipe gestures
+natively. To free them up for drag gestures, install the [_Window
+Gestures_](https://extensions.gnome.org/extension/4245/window-gestures/)
+GNOME shell extension and set it to use 4 fingers (swapping the default
+3/4 finger assignments). This moves workspace switching and window
+management to 4-finger gestures, leaving 3 fingers available for
+`libinput-gestures` drag.
 
 ### AUTOMATIC STOP/RESTART ON D-BUS EVENTS SUCH AS SUSPEND
 
