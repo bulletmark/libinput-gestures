@@ -16,15 +16,11 @@ Note that [libinput does not interpret gestures for
 touchscreens](https://wayland.freedesktop.org/libinput/doc/latest/gestures.html#touchscreen-gestures)
 so this utility can only be used for a touchpad, not a touchscreen.
 
-This small and simple utility is only intended to be used temporarily
-until GNOME and other DE's action libinput gestures natively. It parses
-the output of the _libinput list-devices_ and _libinput debug-events_
-utilities so is a little fragile to any version changes in their output
-format.
-
-This utility is developed and tested on Arch linux using the GNOME 3 DE
-on Xorg and Wayland. It works somewhat incompletely on Wayland (via
-XWayland). See the WAYLAND section below and the comments in the default
+This program parses the output of the `libinput list-devices` and `libinput
+debug-events` utilities so is a little fragile to any version changes in their
+output format. It is developed and tested on Arch linux using the GNOME 3 DE on
+Xorg and Wayland. It works somewhat incompletely on Wayland (via XWayland). See
+the WAYLAND section below and the comments in the default
 `libinput-gestures.conf` file. It has been [reported to work with
 KDE](http://www.lorenzobettini.it/2017/02/touchpad-gestures-in-linux-kde-with-libinput-gestures/).
 I am not sure how well this will work on all Linux systems and DE's etc.
