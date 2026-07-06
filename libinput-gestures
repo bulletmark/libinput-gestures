@@ -232,9 +232,10 @@ class COMMAND:
 internal_commands = {}
 
 
-def add_internal_command(cls) -> None:
+def add_internal_command(cls):
     "Add configuration command to command lookup table based on name"
     internal_commands[re.sub('^COMMAND', '', cls.__name__)] = cls
+    return cls
 
 
 class MyArgumentParser(argparse.ArgumentParser):
@@ -398,6 +399,97 @@ class COMMAND_internal(COMMAND):
         )
 
 
+@add_internal_command
+class COMMAND_drag(COMMAND):
+    "Internal drag command handler using a uinput virtual mouse device (requires python3-evdev)"
+
+    def __init__(self, largs: list):
+        super().__init__(largs)
+        self._uinput = None
+        self._ecodes = None
+        self._lock = threading.Lock()
+        self._release_timer: threading.Timer | None = None
+        self._dragging = False
+        try:
+            self._release_delay = float(largs[1]) / 1000.0 if len(largs) > 1 else 0.0
+        except ValueError:
+            print(f'Warning: invalid _drag delay "{largs[1]}", using 0', file=sys.stderr)
+            self._release_delay = 0.0
+        try:
+            from evdev import UInput, ecodes
+            cap = {ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y], ecodes.EV_KEY: [ecodes.BTN_LEFT]}
+            self._uinput = UInput(cap, name='libinput-gestures-drag')
+            self._ecodes = ecodes
+        except ImportError:
+            print(
+                'Warning: python3-evdev is not installed; _drag command unavailable.',
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(f'Warning: failed to create uinput device: {e}', file=sys.stderr)
+
+    def mousedown(self) -> None:
+        if not self._uinput:
+            return
+        with self._lock:
+            if self._release_timer is not None:
+                self._release_timer.cancel()
+                self._release_timer = None
+                return
+            self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 1)
+            self._uinput.syn()
+            self._dragging = True
+
+    def mousemove(self, dx: int, dy: int) -> None:
+        if not self._uinput:
+            return
+        if dx:
+            self._uinput.write(self._ecodes.EV_REL, self._ecodes.REL_X, dx)
+        if dy:
+            self._uinput.write(self._ecodes.EV_REL, self._ecodes.REL_Y, dy)
+        self._uinput.syn()
+
+    def _do_mouseup(self) -> None:
+        with self._lock:
+            self._release_timer = None
+            self._dragging = False
+            if not self._uinput:
+                return
+            self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+            self._uinput.syn()
+
+    def mouseup(self) -> None:
+        with self._lock:
+            if not self._uinput or not self._dragging:
+                return
+            if self._release_delay > 0:
+                self._release_timer = threading.Timer(self._release_delay, self._do_mouseup)
+                self._release_timer.start()
+            else:
+                self._release_timer = None
+                self._dragging = False
+                self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+                self._uinput.syn()
+
+    def in_grace_period(self) -> bool:
+        with self._lock:
+            return self._release_timer is not None
+
+    def end_grace(self) -> None:
+        "If a release timer is pending, cancel it and release BTN_LEFT immediately"
+        with self._lock:
+            if self._release_timer is not None:
+                self._release_timer.cancel()
+                self._release_timer = None
+                self._dragging = False
+                if self._uinput:
+                    self._uinput.write(self._ecodes.EV_KEY, self._ecodes.BTN_LEFT, 0)
+                    self._uinput.syn()
+
+    def run(self) -> None:
+        pass
+
+
 # Table of gesture handlers
 handlers = {}
 
@@ -476,6 +568,10 @@ class GESTURE(ABC):
 
     def update(self, coords: str) -> bool:
         return True
+
+    def cancel(self) -> None:
+        "Called when a gesture is cancelled mid-motion; override to clean up"
+        pass
 
     def action(self, motion: str, *, command: COMMAND | None = None) -> None:
         "Action a motion command for this gesture"
@@ -645,6 +741,63 @@ class HOLD(GESTURE):
             motion = f'on-{delay:.2f}'
 
         self.action(motion, command=command)
+
+
+@add_gesture_handler
+class DRAG(GESTURE):
+    "Class to handle continuous drag gestures via simulated mouse button hold and movement"
+
+    SUPPORTED_MOTIONS = ('drag',)
+    _cmd: COMMAND | None = None
+
+    def begin(self, fingers: str) -> None:
+        super().begin(fingers)
+        key = ('drag', fingers) if fingers else 'drag'
+        self._cmd = self.motions.get(key) or self.motions.get('drag')
+        if self._cmd and not args.debug:
+            if isinstance(self._cmd, COMMAND_drag):
+                self._cmd.mousedown()
+            else:
+                runcmd(self._cmd.argslist + ['mousedown', '1'], block=False)
+
+    def update(self, coords: str) -> bool:
+        try:
+            x = float(coords[0])
+            y = float(coords[1])
+        except (ValueError, IndexError):
+            return False
+        self.data[0] += x
+        self.data[1] += y
+        if self._cmd and not args.debug:
+            dx, dy = round(x), round(y)
+            if dx or dy:
+                if isinstance(self._cmd, COMMAND_drag):
+                    self._cmd.mousemove(dx, dy)
+                else:
+                    runcmd(self._cmd.argslist + ['mousemove_relative', '--', str(dx), str(dy)])
+        return True
+
+    def end(self) -> None:
+        if args.verbose:
+            print(f'{PROGNAME}: DRAG drag {self.fingers} {self.data}')
+        if self._cmd and not args.debug:
+            if isinstance(self._cmd, COMMAND_drag):
+                self._cmd.mouseup()
+            else:
+                runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
+
+    def cancel(self) -> None:
+        "Release mouse button if gesture is cancelled mid-drag"
+        if self._cmd and not args.debug:
+            if isinstance(self._cmd, COMMAND_drag):
+                self._cmd.mouseup()
+            else:
+                runcmd(self._cmd.argslist + ['mouseup', '1'], block=False)
+
+    def end_grace(self) -> None:
+        "End any pending release grace period immediately"
+        if self._cmd and isinstance(self._cmd, COMMAND_drag):
+            self._cmd.end_grace()
 
 
 # Table of configuration commands
@@ -965,6 +1118,12 @@ def main() -> None:
             print(line.strip())
             continue
 
+        # Cancel drag grace period immediately on any pointer movement (e.g. single finger)
+        drag_handler = handlers.get('DRAG')
+        if drag_handler and drag_handler._cmd and isinstance(drag_handler._cmd, COMMAND_drag) \
+                and drag_handler._cmd.in_grace_period() and 'POINTER_MOTION' in line:
+            drag_handler.end_grace()
+
         # Only interested in gestures
         if 'GESTURE_' not in line or ' +' not in line:
             continue
@@ -991,15 +1150,23 @@ def main() -> None:
                     )
 
         elif event == 'BEGIN':
-            if handler := handlers.get(gesture):
+            if gesture == 'SWIPE' and drag_handler and drag_handler.motions.get(('drag', fingers)):
+                handler = drag_handler
                 handler.begin(fingers)
             else:
-                print(f'Unknown gesture received: {gesture}.', file=sys.stderr)
+                if drag_handler:
+                    drag_handler.end_grace()
+                if handler := handlers.get(gesture):
+                    handler.begin(fingers)
+                else:
+                    print(f'Unknown gesture received: {gesture}.', file=sys.stderr)
         elif event == 'END':
             # Ignore gesture if final action is cancelled
             if handler:
                 if params != 'cancelled':
                     handler.end()
+                else:
+                    handler.cancel()
                 handler = None
         else:
             print(
